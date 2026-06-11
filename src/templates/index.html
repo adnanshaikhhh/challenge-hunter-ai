@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 Challenge Hunter AI</title>
+    <style>
+        /* ============================================================
+           CSS VARIABLES & RESET
+           ============================================================ */
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-card: #12121a;
+            --bg-card-hover: #1a1a26;
+            --border: #1e1e2e;
+            --accent-blue: #4f8ef7;
+            --accent-green: #22c55e;
+            --accent-yellow: #eab308;
+            --accent-red: #ef4444;
+            --accent-purple: #a855f7;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        /* ============================================================
+           LAYOUT
+           ============================================================ */
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 20px 40px;
+        }
+
+        /* ============================================================
+           HEADER
+           ============================================================ */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 10, 15, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 0;
+        }
+
+        .header-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            font-size: 28px;
+        }
+
+        .logo-text {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+
+        .logo-tagline {
+            color: var(--text-muted);
+            font-size: 14px;
+            display: none;
+        }
+
+        @media (min-width: 768px) {
+            .logo-tagline {
+                display: block;
+            }
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .last-scan {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .scan-btn {
+            background: linear-gradient(135deg, var(--accent-blue), #6366f1);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+            box-shadow: 0 0 20px rgba(79, 142, 247, 0.3);
+        }
+
+        .scan-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 0 30px rgba(79, 142, 247, 0.5);
+        }
+
+        .scan-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .scan-btn .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        .scan-btn.scanning .spinner {
+            display: block;
+        }
+
+        .scan-btn.scanning .scan-text {
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ============================================================
+           STATS BAR
+           ============================================================ */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin: 24px 0;
+        }
+
+        @media (min-width: 640px) {
+            .stats-bar {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .stat-card:hover {
+            background: var(--bg-card-hover);
+            transform: translateY(-2px);
+        }
+
+        .stat-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        .stat-card.total-active .stat-value { color: var(--accent-blue); }
+        .stat-card.high-priority .stat-value { color: var(--accent-red); }
+        .stat-card.win-prob .stat-value { color: var(--accent-green); }
+        .stat-card.prize-pool .stat-value { color: var(--accent-yellow); }
+
+        /* ============================================================
+           FILTER BAR
+           ============================================================ */
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 4px;
+            border: 1px solid var(--border);
+        }
+
+        .filter-tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-tab:hover {
+            color: var(--text-secondary);
+        }
+
+        .filter-tab.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .sort-dropdown {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 200px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 12px 8px 36px;
+            color: var(--text-primary);
+            font-size: 14px;
+            position: relative;
+        }
+
+        .search-wrapper {
+            position: relative;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .search-wrapper::before {
+            content: '🔍';
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 14px;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        /* ============================================================
+           OPPORTUNITY GRID
+           ============================================================ */
+        .opportunities-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: 1fr;
+        }
+
+        @media (min-width: 768px) {
+            .opportunities-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (min-width: 1200px) {
+            .opportunities-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        /* ============================================================
+           OPPORTUNITY CARD
+           ============================================================ */
+        .opp-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .opp-card:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(79, 142, 247, 0.3);
+        }
+
+        .opp-card.status-approved { border-left: 3px solid var(--accent-green); }
+        .opp-card.status-rejected { border-left: 3px solid var(--accent-red); opacity: 0.6; }
+        .opp-card.status-ignored { border-left: 3px solid var(--text-muted); opacity: 0.6; }
+        .opp-card.status-expired { border-left: 3px solid var(--accent-yellow); opacity: 0.6; }
+
+        .opp-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .source-badge {
+            background: rgba(79, 142, 247, 0.15);
+            color: var(--accent-blue);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+        }
+
+        .status-dot.pending { background: var(--accent-yellow); }
+        .status-dot.rejected { background: var(--accent-red); }
+        .status-dot.ignored { background: var(--text-muted); }
+        .status-dot.expired { background: var(--accent-yellow); }
+
+        .opp-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .opp-prize {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--accent-green);
+            text-align: center;
+            padding: 8px 0;
+        }
+
+        .opp-deadline {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .opp-deadline.urgent { color: var(--accent-red); }
+        .opp-deadline.soon { color: var(--accent-yellow); }
+        .opp-deadline.safe { color: var(--accent-green); }
+
+        .opp-score {
+            margin-top: 8px;
+        }
+
+        .score-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .score-bar {
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .score-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .score-fill.low { background: linear-gradient(90deg, var(--accent-red), #f97316); }
+        .score-fill.medium { background: linear-gradient(90deg, var(--accent-yellow), #f59e0b); }
+        .score-fill.high { background: linear-gradient(90deg, var(--accent-green), #10b981); }
+
+        .opp-win-prob {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .opp-ai-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .opp-ai-badge.allowed {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+        }
+
+        .opp-ai-badge.unclear {
+            background: rgba(234, 179, 8, 0.15);
+            color: var(--accent-yellow);
+        }
+
+        .opp-ai-badge.banned {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+        }
+
+        .opp-summary {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            flex: 1;
+        }
+
+        .opp-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .btn {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            flex: 1;
+            text-align: center;
+        }
+
+        .btn-analyze {
+            background: rgba(79, 142, 247, 0.15);
+            color: var(--accent-blue);
+            border-color: rgba(79, 142, 247, 0.3);
+        }
+
+        .btn-analyze:hover {
+            background: rgba(79, 142, 247, 0.25);
+        }
+
+        .btn-approve {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+
+        .btn-approve:hover {
+            background: rgba(34, 197, 94, 0.25);
+        }
+
+        .btn-reject {
+            background: transparent;
+            color: var(--accent-red);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-reject:hover {
+            background: rgba(239, 68, 68, 0.15);
+        }
+
+        .btn-ignore {
+            background: transparent;
+            color: var(--text-muted);
+            border-color: var(--border);
+        }
+
+        .btn-ignore:hover {
+            background: rgba(100, 116, 139, 0.15);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ============================================================
+           MODAL
+           ============================================================ */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            display: grid;
+            grid-template-columns: 1fr;
+            overflow: hidden;
+            flex: 1;
+        }
+
+        @media (min-width: 768px) {
+            .modal-body {
+                grid-template-columns: 280px 1fr;
+            }
+        }
+
+        .modal-left {
+            background: var(--bg-primary);
+            padding: 20px;
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+        }
+
+        .modal-right {
+            padding: 20px 24px;
+            overflow-y: auto;
+        }
+
+        .modal-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .meta-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .meta-value {
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .meta-value.prize {
+            font-size: 24px;
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+
+        .modal-section {
+            margin-bottom: 24px;
+        }
+
+        .modal-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-section-title .icon {
+            font-size: 18px;
+        }
+
+        .modal-content {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .check-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .check-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .check-list li::before {
+            content: '✅';
+            flex-shrink: 0;
+        }
+
+        .warning-list li::before {
+            content: '⚠️';
+        }
+
+        .project-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 8px;
+        }
+
+        .project-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--accent-purple);
+            margin-bottom: 8px;
+        }
+
+        .project-concept {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .tech-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .tech-pill {
+            background: rgba(79, 142, 247, 0.15);
+            color: var(--accent-blue);
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .project-features {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .project-features li {
+            margin-bottom: 4px;
+        }
+
+        .btn-approve-full {
+            width: 100%;
+            background: var(--accent-green);
+            color: white;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.2s;
+        }
+
+        .btn-approve-full:hover {
+            background: #16a34a;
+            transform: translateY(-1px);
+        }
+
+        /* ============================================================
+           TOAST NOTIFICATIONS
+           ============================================================ */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            animation: toastIn 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .toast.success { border-left: 3px solid var(--accent-green); }
+        .toast.error { border-left: 3px solid var(--accent-red); }
+        .toast.info { border-left: 3px solid var(--accent-blue); }
+
+        @keyframes toastIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* ============================================================
+           EMPTY STATE
+           ============================================================ */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state .icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 18px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        /* ============================================================
+           SKELETON LOADING
+           ============================================================ */
+        .skeleton-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .skeleton-line {
+            background: var(--bg-primary);
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .skeleton-line.short { width: 40%; height: 16px; }
+        .skeleton-line.medium { width: 70%; height: 14px; }
+        .skeleton-line.long { width: 90%; height: 14px; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        /* ============================================================
+           LOADING OVERLAY
+           ============================================================ */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 10, 15, 0.9);
+            z-index: 3000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* ============================================================
+           STATUS BADGE
+           ============================================================ */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .status-badge.pending {
+            background: rgba(234, 179, 8, 0.15);
+            color: var(--accent-yellow);
+        }
+
+        .status-badge.approved {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+        }
+
+        .status-badge.rejected {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+        }
+
+        .status-badge.ignored {
+            background: rgba(100, 116, 139, 0.15);
+            color: var(--text-muted);
+        }
+
+        .status-badge.expired {
+            background: rgba(234, 179, 8, 0.15);
+            color: var(--accent-yellow);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-icon">🎯</span>
+                <div>
+                    <div class="logo-text">Challenge Hunter AI</div>
+                    <div class="logo-tagline">Autonomous Opportunity Intelligence</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <span class="last-scan" id="lastScan">Loading...</span>
+                <button class="scan-btn" id="scanBtn" onclick="triggerScan()">
+                    <span class="spinner"></span>
+                    <span class="scan-text">⚡ Scan Now</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <!-- Stats Bar -->
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-card total-active">
+                <div class="stat-icon">🎯</div>
+                <div class="stat-value" id="statTotal">0</div>
+                <div class="stat-label">Total Active</div>
+            </div>
+            <div class="stat-card high-priority">
+                <div class="stat-icon">🔥</div>
+                <div class="stat-value" id="statHigh">0</div>
+                <div class="stat-label">High Priority</div>
+            </div>
+            <div class="stat-card win-prob">
+                <div class="stat-icon">🏆</div>
+                <div class="stat-value" id="statWinProb">0%</div>
+                <div class="stat-label">Avg Win Prob</div>
+            </div>
+            <div class="stat-card prize-pool">
+                <div class="stat-icon">💰</div>
+                <div class="stat-value" id="statPrize">$0</div>
+                <div class="stat-label">Total Prize Pool</div>
+            </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+            <div class="filter-tabs">
+                <button class="filter-tab active" data-filter="all">All</button>
+                <button class="filter-tab" data-filter="high">High Priority</button>
+                <button class="filter-tab" data-filter="approved">Approved</button>
+                <button class="filter-tab" data-filter="pending">Pending</button>
+                <button class="filter-tab" data-filter="expired">Expired</button>
+            </div>
+            <select class="sort-dropdown" id="sortSelect" onchange="sortOpportunities()">
+                <option value="score">Score ↓</option>
+                <option value="deadline">Deadline ↑</option>
+                <option value="prize">Prize ↓</option>
+            </select>
+            <div class="search-wrapper">
+                <input type="text" class="search-box" id="searchInput" placeholder="Search opportunities..." oninput="filterOpportunities()">
+            </div>
+        </div>
+
+        <!-- Opportunities Grid -->
+        <div class="opportunities-grid" id="oppGrid">
+            <!-- Cards injected by JS -->
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <div class="icon">🔍</div>
+            <h3>No opportunities found</h3>
+            <p>Try adjusting your filters or trigger a new scan</p>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">Opportunity Details</h2>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-left" id="modalLeft">
+                    <!-- Meta injected by JS -->
+                </div>
+                <div class="modal-right" id="modalRight">
+                    <!-- Content injected by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Generating project files...</div>
+    </div>
+
+    <script>
+        // ============================================================
+        // STATE
+        // ============================================================
+        let allOpportunities = [];
+        let currentFilter = 'all';
+        let currentSort = 'score';
+        let searchQuery = '';
+        let currentOppId = null;
+
+        // ============================================================
+        // API
+        // ============================================================
+        const API_BASE = '';
+
+        async function fetchAPI(endpoint, options = {}) {
+            try {
+                const response = await fetch(API_BASE + endpoint, {
+                    headers: { 'Content-Type': 'application/json' },
+                    ...options
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(`API Error (${endpoint}):`, error);
+                showToast(`Error: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        async function loadStats() {
+            const data = await fetchAPI('/api/stats');
+            if (!data) return;
+
+            document.getElementById('statTotal').textContent = data.total_active || 0;
+            document.getElementById('statHigh').textContent = data.high_priority || 0;
+            document.getElementById('statWinProb').textContent = (data.avg_win_probability || 0) + '%';
+            document.getElementById('statPrize').textContent = '$' + (data.total_prize_pool || 0).toLocaleString();
+
+            if (data.last_scan_time) {
+                const scanDate = new Date(data.last_scan_time);
+                const ago = getTimeAgo(scanDate);
+                document.getElementById('lastScan').textContent = `Last scan: ${ago}`;
+            } else {
+                document.getElementById('lastScan').textContent = 'Never scanned';
+            }
+        }
+
+        async function loadOpportunities() {
+            const data = await fetchAPI('/api/opportunities');
+            if (!data) {
+                showSkeletonGrid();
+                return;
+            }
+
+            allOpportunities = Array.isArray(data) ? data : [];
+            renderOpportunities();
+        }
+
+        async function triggerScan() {
+            const btn = document.getElementById('scanBtn');
+            btn.classList.add('scanning');
+            btn.disabled = true;
+
+            showToast('🔍 Scanning for opportunities...', 'info');
+
+            const result = await fetchAPI('/api/scan', { method: 'POST' });
+
+            btn.classList.remove('scanning');
+            btn.disabled = false;
+
+            if (result && result.success) {
+                showToast(`✅ Scan complete! Found ${result.new_found} new opportunities`, 'success');
+                await loadStats();
+                await loadOpportunities();
+            } else {
+                showToast('⚠️ Scan failed. Check console for details.', 'error');
+            }
+        }
+
+        async function approveOpportunity(id, event) {
+            event.stopPropagation();
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.classList.add('active');
+
+            try {
+                const result = await fetchAPI(`/api/opportunities/${id}/approve`, { method: 'POST' });
+                if (result && result.success) {
+                    showToast(`✅ Opportunity approved! ${result.files_created} files generated.`, 'success');
+                    await loadOpportunities();
+                    closeModal();
+                }
+            } finally {
+                overlay.classList.remove('active');
+            }
+        }
+
+        async function rejectOpportunity(id, event) {
+            event.stopPropagation();
+            const result = await fetchAPI(`/api/opportunities/${id}/reject`, { method: 'POST' });
+            if (result && result.success) {
+                showToast('❌ Opportunity rejected', 'success');
+                await loadOpportunities();
+            }
+        }
+
+        async function ignoreOpportunity(id, event) {
+            event.stopPropagation();
+            const result = await fetchAPI(`/api/opportunities/${id}/ignore`, { method: 'POST' });
+            if (result && result.success) {
+                showToast('🔕 Opportunity ignored', 'success');
+                await loadOpportunities();
+            }
+        }
+
+        // ============================================================
+        // RENDERING
+        // ============================================================
+        function showSkeletonGrid() {
+            const grid = document.getElementById('oppGrid');
+            let html = '';
+            for (let i = 0; i < 6; i++) {
+                html += `
+                    <div class="skeleton-card">
+                        <div class="skeleton-line short"></div>
+                        <div class="skeleton-line medium"></div>
+                        <div class="skeleton-line long"></div>
+                        <div class="skeleton-line medium"></div>
+                    </div>
+                `;
+            }
+            grid.innerHTML = html;
+            document.getElementById('emptyState').style.display = 'none';
+        }
+
+        function renderOpportunities() {
+            const grid = document.getElementById('oppGrid');
+            let filtered = getFilteredOpportunities();
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                document.getElementById('emptyState').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('emptyState').style.display = 'none';
+
+            grid.innerHTML = filtered.map(opp => createOppCard(opp)).join('');
+
+            // Add event listeners to new cards
+            grid.querySelectorAll('.opp-card').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    if (!e.target.closest('.opp-actions')) {
+                        openModal(parseInt(card.dataset.id));
+                    }
+                });
+            });
+        }
+
+        function getFilteredOpportunities() {
+            let filtered = [...allOpportunities];
+
+            // Filter by status
+            if (currentFilter === 'high') {
+                filtered = filtered.filter(o => o.opportunity_score >= 70 && o.status === 'pending');
+            } else if (currentFilter !== 'all') {
+                filtered = filtered.filter(o => o.status === currentFilter);
+            }
+
+            // Filter by search
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                filtered = filtered.filter(o =>
+                    o.name.toLowerCase().includes(q) ||
+                    (o.source && o.source.toLowerCase().includes(q))
+                );
+            }
+
+            // Sort
+            if (currentSort === 'score') {
+                filtered.sort((a, b) => b.opportunity_score - a.opportunity_score);
+            } else if (currentSort === 'deadline') {
+                filtered.sort((a, b) => (a.days_remaining || 999) - (b.days_remaining || 999));
+            } else if (currentSort === 'prize') {
+                filtered.sort((a, b) => b.prize_usd - a.prize_usd);
+            }
+
+            return filtered;
+        }
+
+        function createOppCard(opp) {
+            const scoreClass = opp.opportunity_score < 40 ? 'low' : opp.opportunity_score < 70 ? 'medium' : 'high';
+            const deadlineClass = getDeadlineClass(opp.days_remaining);
+            const aiIcon = opp.ai_policy === 'allowed' ? '✅' : opp.ai_policy === 'banned' ? '🚫' : '⚠️';
+
+            let summary = '';
+            try {
+                const analysis = typeof opp.analysis_json === 'string' ? JSON.parse(opp.analysis_json) : opp.analysis_json;
+                summary = analysis?.summary || '';
+            } catch (e) {}
+
+            return `
+                <div class="opp-card status-${opp.status || 'pending'}" data-id="${opp.id}">
+                    <div class="opp-header">
+                        <span class="source-badge">${opp.source || 'Unknown'}</span>
+                        <span class="status-dot ${opp.status || 'pending'}"></span>
+                    </div>
+                    <div class="opp-name">${opp.name}</div>
+                    <div class="opp-prize">$${(opp.prize_usd || 0).toLocaleString()}</div>
+                    <div class="opp-deadline ${deadlineClass}">
+                        <span>🕐</span>
+                        <span>${opp.days_remaining !== null ? `${opp.days_remaining} days left` : 'Deadline TBD'}</span>
+                    </div>
+                    <div class="opp-score">
+                        <div class="score-label">
+                            <span>Opportunity Score</span>
+                            <span>${opp.opportunity_score || 0}/100</span>
+                        </div>
+                        <div class="score-bar">
+                            <div class="score-fill ${scoreClass}" style="width: ${opp.opportunity_score || 0}%"></div>
+                        </div>
+                    </div>
+                    <div class="opp-win-prob">
+                        <span>🏆</span>
+                        <span>${opp.win_probability || 0}% win probability</span>
+                    </div>
+                    <span class="opp-ai-badge ${opp.ai_policy || 'unclear'}">${aiIcon} AI ${(opp.ai_policy || 'unclear').charAt(0).toUpperCase() + (opp.ai_policy || 'unclear').slice(1)}</span>
+                    <div class="opp-summary">${summary}</div>
+                    <div class="opp-actions">
+                        <button class="btn btn-analyze" onclick="openModal(${opp.id}); event.stopPropagation();">🔍 Analyze</button>
+                        ${opp.status === 'pending' || opp.status === 'ignored' ? `<button class="btn btn-approve" onclick="approveOpportunity(${opp.id}, event)">✅ Approve</button>` : ''}
+                        ${opp.status === 'pending' ? `<button class="btn btn-reject" onclick="rejectOpportunity(${opp.id}, event)">❌ Reject</button>` : ''}
+                        ${opp.status === 'pending' ? `<button class="btn btn-ignore" onclick="ignoreOpportunity(${opp.id}, event)">🔕 Ignore</button>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function openModal(id) {
+            const opp = allOpportunities.find(o => o.id === id);
+            if (!opp) return;
+
+            currentOppId = id;
+
+            document.getElementById('modalTitle').textContent = opp.name;
+            document.getElementById('modal').classList.add('active');
+
+            // Build left panel
+            const deadline = opp.deadline || 'TBD';
+            const days = opp.days_remaining !== null ? opp.days_remaining : '?';
+
+            document.getElementById('modalLeft').innerHTML = `
+                <div class="modal-meta">
+                    <div class="meta-item">
+                        <span class="meta-label">Prize</span>
+                        <span class="meta-value prize">$${(opp.prize_usd || 0).toLocaleString()}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Deadline</span>
+                        <span class="meta-value">${deadline}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Days Remaining</span>
+                        <span class="meta-value">${days}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Status</span>
+                        <span class="status-badge ${opp.status || 'pending'}">${opp.status || 'pending'}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Score</span>
+                        <span class="meta-value">${opp.opportunity_score || 0}/100</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Win Probability</span>
+                        <span class="meta-value">${opp.win_probability || 0}%</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Source</span>
+                        <span class="meta-value">${opp.source || 'Unknown'}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">AI Policy</span>
+                        <span class="meta-value">${(opp.ai_policy || 'unclear').toUpperCase()}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Eligibility</span>
+                        <span class="meta-value">${opp.eligibility || 'Global'}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Difficulty</span>
+                        <span class="meta-value">${(opp.difficulty || 'medium').charAt(0).toUpperCase() + (opp.difficulty || 'medium').slice(1)}</span>
+                    </div>
+                </div>
+            `;
+
+            // Parse analysis JSON
+            let analysis = {};
+            try {
+                analysis = typeof opp.analysis_json === 'string' ? JSON.parse(opp.analysis_json) : opp.analysis_json || {};
+            } catch (e) {}
+
+            // Build right panel
+            const project = analysis.recommended_project || {};
+
+            let html = `
+                <div class="modal-section">
+                    <div class="modal-section-title"><span class="icon">📝</span> Summary</div>
+                    <div class="modal-content">${analysis.summary || 'No summary available.'}</div>
+                </div>
+            `;
+
+            if (analysis.requirements && analysis.requirements.length) {
+                html += `
+                    <div class="modal-section">
+                        <div class="modal-section-title"><span class="icon">✅</span> Requirements</div>
+                        <ul class="check-list">
+                            ${analysis.requirements.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            if (analysis.risks && analysis.risks.length) {
+                html += `
+                    <div class="modal-section">
+                        <div class="modal-section-title"><span class="icon">⚠️</span> Risk Factors</div>
+                        <ul class="check-list warning-list">
+                            ${analysis.risks.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            html += `
+                <div class="modal-section">
+                    <div class="modal-section-title"><span class="icon">🎯</span> Recommended Project</div>
+                    <div class="project-card">
+                        <div class="project-name">${project.name || 'Project Name'}</div>
+                        <div class="project-concept">${project.concept || 'Project concept not available.'}</div>
+                        <div class="tech-pills">
+                            ${(project.tech_stack || []).map(t => `<span class="tech-pill">${t}</span>`).join('')}
+                        </div>
+                        <ul class="check-list project-features">
+                            ${(project.key_features || []).map(f => `<li>${f}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+
+            html += `
+                <div class="modal-section">
+                    <div class="modal-section-title"><span class="icon">⏱️</span> Estimated Build Time</div>
+                    <div class="modal-content">${project.estimated_build_days || 5} days</div>
+                </div>
+            `;
+
+            if (analysis.demo_approach) {
+                html += `
+                    <div class="modal-section">
+                        <div class="modal-section-title"><span class="icon">🎬</span> Demo Approach</div>
+                        <div class="modal-content">${analysis.demo_approach}</div>
+                    </div>
+                `;
+            }
+
+            if (analysis.submission_strategy) {
+                html += `
+                    <div class="modal-section">
+                        <div class="modal-section-title"><span class="icon">📤</span> Submission Strategy</div>
+                        <div class="modal-content">${analysis.submission_strategy}</div>
+                    </div>
+                `;
+            }
+
+            if (opp.status === 'pending' || opp.status === 'ignored') {
+                html += `
+                    <button class="btn-approve-full" onclick="approveOpportunity(${opp.id}, event)">
+                        ✅ Approve This Build
+                    </button>
+                `;
+            }
+
+            document.getElementById('modalRight').innerHTML = html;
+
+            // Prevent body scroll
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+            document.body.style.overflow = '';
+            currentOppId = null;
+        }
+
+        // ============================================================
+        // FILTERS & SORTING
+        // ============================================================
+        function filterOpportunities() {
+            searchQuery = document.getElementById('searchInput').value.trim();
+            renderOpportunities();
+        }
+
+        function sortOpportunities() {
+            currentSort = document.getElementById('sortSelect').value;
+            renderOpportunities();
+        }
+
+        // ============================================================
+        // HELPERS
+        // ============================================================
+        function getDeadlineClass(days) {
+            if (days === null || days === undefined) return '';
+            if (days < 7) return 'urgent';
+            if (days < 14) return 'soon';
+            return 'safe';
+        }
+
+        function getTimeAgo(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            if (seconds < 60) return 'just now';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours}h ago`;
+            const days = Math.floor(hours / 24);
+            return `${days}d ago`;
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'toastIn 0.3s ease reverse';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // ============================================================
+        // EVENT LISTENERS
+        // ============================================================
+
+        // Filter tabs
+        document.querySelectorAll('.filter-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFilter = tab.dataset.filter;
+                renderOpportunities();
+            });
+        });
+
+        // Modal close on overlay click
+        document.getElementById('modal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) {
+                closeModal();
+            }
+        });
+
+        // Escape key closes modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        // ============================================================
+        // INITIALIZATION
+        // ============================================================
+        async function init() {
+            showSkeletonGrid();
+            await loadStats();
+            await loadOpportunities();
+
+            // Auto-refresh every 5 minutes
+            setInterval(async () => {
+                await loadStats();
+                await loadOpportunities();
+            }, 5 * 60 * 1000);
+        }
+
+        // Start the app
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+# Challenge Hunter AI - Recovery Report
+# Generated: 2026-06-11
+
+---
+
+## Project Status
+
+**Project:** Challenge Hunter AI
+**Recovery Date:** 2026-06-11
+**Status:** ✅ RECOVERED — Deployment Ready
+
+---
+
+## Recovery Audit Summary
+
+| Check | Result |
+|-------|--------|
+| Project folder on disk | ✅ Found at `Documents/Codex/Projects/challenge-hunter-ai/` |
+| All Python source files | ✅ Complete (app.py, scanner.py, telegram_bot.py, generator.py, seed.py) |
+| Database schema | ✅ Complete (schema.sql) |
+| Dashboard UI | ✅ Complete (templates/index.html — 1526 lines) |
+| Requirements | ✅ Complete (requirements.txt) |
+| Procfile | ✅ Present |
+| Git repository | ❌ Not initialized (created during recovery) |
+| GitHub repository | ❌ Not created (created during recovery) |
+| Deployment | ❌ Not deployed (deployed during recovery) |
+
+---
+
+## File Completeness Assessment
+
+| File | Lines | Status |
+|------|-------|--------|
+| app.py | 443 | ✅ Complete — all 11 endpoints implemented |
+| scanner.py | 650 | ✅ Complete — scanner engine with APScheduler |
+| telegram_bot.py | 507 | ✅ Complete — bot handler + all commands |
+| generator.py | 1002 | ✅ Complete — all 5 file generators |
+| schema.sql | 47 | ✅ Complete — 3 tables, 6 indexes |
+| seed.py | 314 | ✅ Complete — 3 seed records with scoring |
+| templates/index.html | 1526 | ✅ Complete — full dark UI dashboard |
+| requirements.txt | 8 deps | ✅ Complete — all pinned versions |
+| Procfile | 1 line | ✅ Complete |
+| README.md | — | ✅ Created during recovery |
+| .env.example | — | ✅ Created during recovery |
+| runtime.txt | — | ✅ Created during recovery |
+| render.yaml | — | ✅ Created during recovery |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Flask Backend                     │
+│              Port 5000 (or $PORT)                    │
+│                                                      │
+│  /                  → Dashboard UI                  │
+│  /health            → Health check                  │
+│  /api/opportunities → CRUD + scoring                │
+│  /api/scan          → Manual scan trigger           │
+│  /api/stats          → Dashboard statistics         │
+│  /api/projects/<id> → Generated file retrieval      │
+└──────────────────────┬──────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│   SQLite     │ │  APScheduler │ │  Telegram    │
+│  (opport-    │ │  (6h scan)   │ │  Bot (v20)   │
+│   unities.db)│ │              │ │              │
+└──────────────┘ └──────────────┘ └──────────────┘
+```
+
+## Database Tables
+
+1. **opportunities** — 17 columns: id, name, url, prize_usd, deadline, days_remaining, rules_summary, ai_policy, eligibility, difficulty, opportunity_score, win_probability, status, analysis_json, source, created_at, updated_at
+2. **project_files** — 5 columns: id, opportunity_id, filename, content, created_at
+3. **scan_log** — 5 columns: id, scan_time, sources_scanned, new_found, errors
+
+---
+
+## Completed Work
+
+- ✅ All 9 source files written and verified complete
+- ✅ Database schema and seed data implemented
+- ✅ Scoring formulas (opportunity score + win probability) implemented per spec
+- ✅ AI analysis JSON template generation implemented
+- ✅ Telegram bot with inline keyboard commands implemented
+- ✅ Full dark-themed dashboard UI with modal, filters, search, stats bar
+- ✅ APScheduler background scanner (every 6 hours)
+- ✅ Railway/Render deployment configurations
+
+---
+
+## Remaining Work (at time of crash)
+
+- ❌ Git not initialized
+- ❌ GitHub repo not created
+- ❌ No deployment
+
+**Note:** Everything else was complete. Recovery created the git repo, GitHub repo, and deployed to Railway.
+
+---
+
+## Deployment Information
+
+**Railway Project URL:** https://railway.app/project/challenge-hunter-ai
+**Live URL:** https://challenge-hunter-ai.up.railway.app
+**Health Check:** https://challenge-hunter-ai.up.railway.app/health
+
+**GitHub Repository:** https://github.com/adnanshaikhhh/challenge-hunter-ai
+
+---
+
+## Key Decisions Made During Recovery
+
+1. **Workspace restructure** — Moved from nested `nextjs_space/challenge-hunter-ai/` to standalone `Projects/challenge-hunter-ai/src/`
+2. **Missing files created** — README.md, .env.example, runtime.txt, render.yaml were missing (created from spec)
+3. **Git initialized** — Repository was never initialized in the project folder
+4. **Deployed to Railway** — Used Railway CLI with Procfile for persistent backend
+
+---
+
+## Recovery Verification Checklist
+
+- [x] All source files present and complete
+- [x] No files need regeneration
+- [x] Git repository initialized
+- [x] GitHub repository created and pushed
+- [x] Railway deployment live
+- [x] Health check returns `{"status": "ok"}`
+- [x] `/api/stats` returns dashboard data
+- [x] Seed data in database (3 opportunities)
+- [x] RECOVERY.md created
+
+---
+
+*Generated by Hermes Agent during recovery from unexpected system restart*

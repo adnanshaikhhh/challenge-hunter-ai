@@ -1,0 +1,25 @@
+# Challenge Hunter AI - Render Deployment Configuration
+# Deploy at: https://render.com
+# Connect: GitHub repo → render.yaml detected automatically
+
+services:
+  - type: web
+    name: challenge-hunter-ai
+    env: python
+    buildCommand: pip install -r src/requirements.txt
+    startCommand: gunicorn src.app:app --bind 0.0.0.0:$PORT --workers 2
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: SCAN_INTERVAL_HOURS
+        value: "6"
+      - key: MIN_SCORE_FOR_ALERT
+        value: "70"
+      - key: SECRET_KEY
+        generateValue: true
