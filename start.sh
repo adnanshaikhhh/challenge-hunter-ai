@@ -6,19 +6,11 @@ set -e
 # regardless of the current working directory.
 export PYTHONPATH=/app/src:$PYTHONPATH
 
-# Initialize SQLite database schema on first run
-# Railway ephemeral — DB recreated on each redeploy (acceptable for hobby)
+# Database path - must match what app.py uses (derived from __file__ at /app/src/app.py)
+# Note: app.py auto-initializes DB at module load time if it doesn't exist
 DB_PATH="${DB_PATH:-/app/opportunities.db}"
-mkdir -p "$(dirname "$DB_PATH")"
-
-if [ ! -f "$DB_PATH" ]; then
-    echo "📦 First run — initializing database..."
-    sqlite3 "$DB_PATH" < /app/src/schema.sql
-    echo "✅ Database schema created at $DB_PATH"
-else
-    echo "✅ Database exists at $DB_PATH"
-fi
 
 echo "🚀 Starting gunicorn from $(pwd)..."
 echo "✅ PYTHONPATH=$PYTHONPATH"
+echo "✅ DB_PATH=$DB_PATH"
 exec gunicorn app:app --bind 0.0.0.0:$PORT --workers 2

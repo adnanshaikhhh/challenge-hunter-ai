@@ -10,6 +10,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from functools import wraps
+import re
 
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
@@ -26,6 +27,217 @@ from telegram_bot import TelegramBotHandler
 DB_PATH = os.environ.get('DB_PATH', os.path.join(os.path.dirname(__file__), 'opportunities.db'))
 PORT = int(os.environ.get('PORT', 5000))
 DEBUG = os.environ.get('FLASK_ENV', 'production') == 'development'
+
+# =============================================================================
+# DATABASE INITIALIZATION (runs on module load - works with Gunicorn)
+# =============================================================================
+
+def init_database():
+    """Initialize database with schema and seed data if not exists. Called on module load."""
+    schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+    
+    # Check if database exists
+    db_exists = os.path.exists(DB_PATH)
+    
+    if not db_exists:
+        print(f"📦 Database not found at {DB_PATH}")
+        print("   Initializing new database...")
+        
+        # Create database and schema
+        conn = sqlite3.connect(DB_PATH)
+        
+        if os.path.exists(schema_path):
+            with open(schema_path, 'r') as f:
+                schema_sql = f.read()
+            conn.executescript(schema_sql)
+            print("   ✅ Schema created")
+        else:
+            # Fallback: create tables manually
+            _create_schema_manually(conn)
+            print("   ✅ Schema created (manual)")
+        
+        conn.commit()
+        conn.close()
+        
+        # Seed initial data
+        _seed_initial_data()
+        print("   ✅ Seed data inserted")
+        print("   ✅ Database initialization complete")
+    else:
+        print(f"📊 Database found at {DB_PATH}")
+
+def _create_schema_manually(conn):
+    """Create schema tables manually if schema.sql not found"""
+    cursor = conn.cursor()
+    cursor.executescript("""
+        CREATE TABLE IF NOT EXISTS opportunities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            url TEXT UNIQUE NOT NULL,
+            prize_usd INTEGER DEFAULT 0,
+            deadline TEXT,
+            days_remaining INTEGER,
+            rules_summary TEXT,
+            ai_policy TEXT DEFAULT 'unclear',
+            eligibility TEXT,
+            difficulty TEXT DEFAULT 'medium',
+            opportunity_score INTEGER DEFAULT 0,
+            win_probability INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            analysis_json TEXT,
+            source TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        
+        CREATE TABLE IF NOT EXISTS project_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            opportunity_id INTEGER REFERENCES opportunities(id),
+            filename TEXT,
+            content TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        
+        CREATE TABLE IF NOT EXISTS scan_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_time TEXT DEFAULT (datetime('now')),
+            sources_scanned INTEGER,
+            new_found INTEGER,
+            errors TEXT
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_opportunities_status ON opportunities(status);
+        CREATE INDEX IF NOT EXISTS idx_opportunities_score ON opportunities(opportunity_score DESC);
+        CREATE INDEX IF NOT EXISTS idx_opportunities_deadline ON opportunities(deadline);
+        CREATE INDEX IF NOT EXISTS idx_opportunities_source ON opportunities(source);
+        CREATE INDEX IF NOT EXISTS idx_project_files_opportunity ON project_files(opportunity_id);
+    """)
+
+def _seed_initial_data():
+    """Insert seed data if database is empty"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Check if already seeded
+    cursor.execute("SELECT COUNT(*) FROM opportunities")
+    count = cursor.fetchone()[0]
+    if count > 0:
+        conn.close()
+        return
+    
+    today = datetime.now()
+    deadline_30 = (today + timedelta(days=30)).strftime('%Y-%m-%d')
+    deadline_21 = (today + timedelta(days=21)).strftime('%Y-%m-%d')
+    deadline_45 = (today + timedelta(days=45)).strftime('%Y-%m-%d')
+    
+    seed_records = [
+        {
+            'name': 'Devpost AI Innovation Challenge 2025',
+            'url': 'https://devpost.com/hackathons',
+            'prize_usd': 10000,
+            'deadline': deadline_30,
+            'ai_policy': 'allowed',
+            'difficulty': 'medium',
+            'source': 'Devpost',
+            'eligibility': 'Global, solo or team',
+            'rules_summary': 'Build innovative projects using AI tools. Any tech stack allowed. Submit a working demo and 2-minute video.',
+        },
+        {
+            'name': 'Hugging Face Open Source AI Grant',
+            'url': 'https://huggingface.co/grants',
+            'prize_usd': 5000,
+            'deadline': deadline_21,
+            'ai_policy': 'allowed',
+            'difficulty': 'easy',
+            'source': 'HuggingFace',
+            'eligibility': 'Global, solo',
+            'rules_summary': 'Create open source AI projects using Hugging Face tools. Must be fully open source with code public.',
+        },
+        {
+            'name': 'Solana Summer Builder Grant 2025',
+            'url': 'https://solana.com/grants',
+            'prize_usd': 25000,
+            'deadline': deadline_45,
+            'ai_policy': 'allowed',
+            'difficulty': 'hard',
+            'source': 'Solana',
+            'eligibility': 'Global, solo or team',
+            'rules_summary': 'Build on Solana blockchain. Must submit working product. Multiple grant tiers available up to $50K.',
+        },
+    ]
+    
+    def calc_score(prize_usd, days_rem, ai_pol, elig, diff, src):
+        score = 50
+        if prize_usd > 10000: score += 15
+        elif prize_usd >= 5000: score += 10
+        elif prize_usd >= 1000: score += 5
+        if days_rem and 14 <= days_rem <= 45: score += 10
+        elif days_rem and 7 <= days_rem < 14: score += 5
+        if ai_pol == 'allowed': score += 15
+        elif ai_pol == 'unclear': score -= 15
+        if elig:
+            if 'solo' in elig.lower(): score += 5
+            if 'global' in elig.lower(): score += 5
+            if 'team only' in elig.lower(): score -= 10
+        if diff == 'easy': score += 5
+        elif diff == 'hard': score -= 5
+        corp = ['google', 'microsoft', 'amazon', 'meta', 'apple', 'nvidia']
+        if src and any(s in src.lower() for s in corp): score -= 10
+        return max(0, min(100, score))
+    
+    def calc_prob(prize_usd, days_rem, ai_pol, diff, elig, src):
+        prob = 30
+        if prize_usd > 5000: prob += 10
+        if days_rem and days_rem > 14: prob += 10
+        if ai_pol == 'allowed': prob += 15
+        corp = ['google', 'microsoft', 'amazon', 'meta', 'apple', 'nvidia']
+        if src and any(s in src.lower() for s in corp): prob -= 20
+        if diff == 'easy': prob += 10
+        elif diff == 'hard': prob -= 10
+        if elig and 'solo' not in elig.lower(): prob -= 10
+        return max(0, min(100, prob))
+    
+    for record in seed_records:
+        deadline_dt = datetime.strptime(record['deadline'], '%Y-%m-%d')
+        days_rem = (deadline_dt - today).days
+        score = calc_score(record['prize_usd'], days_rem, record['ai_policy'], record['eligibility'], record['difficulty'], record['source'])
+        prob = calc_prob(record['prize_usd'], days_rem, record['ai_policy'], record['difficulty'], record['eligibility'], record['source'])
+        
+        analysis = {
+            "summary": f"A {record['difficulty']} opportunity with ${record['prize_usd']} prize.",
+            "requirements": ["Build a functional demo", "Submit before deadline", "Prepare video demo", "Write README"],
+            "risks": ["High competition", "Deadline pressure"],
+            "win_probability_reasoning": f"Based on {record['difficulty']} difficulty, ${record['prize_usd']} prize.",
+            "build_complexity": record['difficulty'],
+            "recommended_project": {"name": record['name'][:30].replace(' ', '-').lower(), "tech_stack": ["Python", "Flask", "React"]},
+            "submission_strategy": "Focus on demo quality and documentation.",
+            "recommended_action": "approve"
+        }
+        
+        try:
+            cursor.execute("""
+                INSERT INTO opportunities (
+                    name, url, prize_usd, deadline, days_remaining,
+                    rules_summary, ai_policy, eligibility, difficulty,
+                    opportunity_score, win_probability, status, analysis_json, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record['name'], record['url'], record['prize_usd'], record['deadline'], days_rem,
+                record.get('rules_summary', ''), record['ai_policy'], record['eligibility'],
+                record['difficulty'], score, prob, 'pending', json.dumps(analysis), record['source']
+            ))
+        except sqlite3.IntegrityError:
+            pass
+    
+    # Log the seed
+    cursor.execute("INSERT INTO scan_log (scan_time, sources_scanned, new_found, errors) VALUES (?, ?, ?, ?)",
+                   (datetime.now().isoformat(), 0, len(seed_records), None))
+    
+    conn.commit()
+    conn.close()
+
+# Initialize database on module load (before Flask app creation)
+init_database()
 
 # =============================================================================
 # FLASK APP SETUP
@@ -406,12 +618,6 @@ def internal_error(e):
 # =============================================================================
 
 if __name__ == '__main__':
-    # Ensure database exists
-    if not os.path.exists(DB_PATH):
-        print("❌ Database not found. Please run: python seed.py")
-        print("   This will create the database and seed initial data.")
-        exit(1)
-
     print("=" * 60)
     print("🎯 Challenge Hunter AI - Backend Server")
     print("=" * 60)
