@@ -1,1 +1,1 @@
-web: PYTHONPATH=/app/src:$PYTHONPATH cd src && sqlite3 opportunities.db < schema.sql 2>/dev/null || true && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
+web: PYTHONPATH=/app/src:$PYTHONPATH cd /app/src && gunicorn -c gunicorn_config.py app:app
