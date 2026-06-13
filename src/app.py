@@ -43,21 +43,32 @@ def _ensure_db() -> None:
     new_db = not os.path.exists(DB_PATH)
     if new_db:
         os.makedirs(os.path.dirname(DB_PATH) or '.', exist_ok=True)
-        print(f"📦 Creating new database at {DB_PATH}")
+        print(f"📦 Creating new database at {DB_PATH}", flush=True)
     conn = sqlite3.connect(DB_PATH)
     if new_db:
         with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
             conn.executescript(f.read())
-        print("   ✅ schema created")
+        print("   ✅ schema created", flush=True)
+    else:
+        # Always ensure schema exists (handles existing-DB-without-tables case)
+        if os.path.exists(SCHEMA_PATH):
+            with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
+                conn.executescript(f.read())
+            print("   ✅ schema verified", flush=True)
+    # Verify the opportunities table actually exists
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='opportunities'")
+    if not cur.fetchone():
+        print("   ⚠️  opportunities table missing after schema run", flush=True)
     conn.close()
     if new_db:
         # auto-seed
         from seed import seed_database
         try:
             n = seed_database()
-            print(f"   ✅ seeded {n} opportunities")
+            print(f"   ✅ seeded {n} opportunities", flush=True)
         except Exception as e:
-            print(f"   ⚠️  seed failed: {e}")
+            print(f"   ⚠️  seed failed: {e}", flush=True)
 
 
 _ensure_db()

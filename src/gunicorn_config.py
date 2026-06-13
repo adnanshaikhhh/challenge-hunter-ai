@@ -27,6 +27,14 @@ def on_starting(server):
 def post_fork(server, worker):
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        # Ensure DB is initialised BEFORE the scheduler can fire any jobs.
+        # Workers don't import app.py until first request, so we trigger
+        # the DB init explicitly here.
+        try:
+            from app import _ensure_db
+            _ensure_db()
+        except Exception as e:
+            log.exception(f"DB init failed in post_fork: {e}")
         from scheduler import SchedulerManager
         SchedulerManager.start()
         log.info(f"Scheduler started in worker {worker.pid}")

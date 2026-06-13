@@ -95,7 +95,8 @@ class SchedulerManager:
                 id='full_scan',
                 name='Full opportunity scan',
                 replace_existing=True,
-                next_run_time=datetime_now()  # run once on startup
+                # Defer first run 60s to give DB init / seed time to complete.
+                next_run_time=datetime_now_plus_seconds(60)
             )
             scheduler.add_job(
                 job_daily_digest,
@@ -135,6 +136,11 @@ class SchedulerManager:
 def datetime_now():
     from datetime import datetime
     return datetime.now()
+
+
+def datetime_now_plus_seconds(seconds: int):
+    from datetime import datetime, timedelta
+    return datetime.now() + timedelta(seconds=seconds)
 
 
 # ----------------------------------------------------------------------------
