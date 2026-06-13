@@ -398,7 +398,80 @@ def t_notifier():
 
 
 # ----------------------------------------------------------------------------
-# Main
+# Code generator tests
+# ----------------------------------------------------------------------------
+
+def t_code_generator():
+    print("\n[code_generator]")
+
+    @test("extract_files_from_response with language:path format")
+    def _():
+        from code_generator import extract_files_from_response
+        text = """```python:src/main.py
+print('hello')
+```
+
+```html:frontend/index.html
+<!doctype html>
+<h1>Hi</h1>
+```"""
+        files = extract_files_from_response(text)
+        assert 'src/main.py' in files, files
+        assert 'frontend/index.html' in files, files
+        assert "print('hello')" in files['src/main.py']
+        assert '<h1>Hi</h1>' in files['frontend/index.html']
+
+    @test("extract_files_from_response with bare language tags")
+    def _():
+        from code_generator import extract_files_from_response
+        text = """```python
+def foo(): pass
+```
+
+```javascript
+console.log('hi');
+```"""
+        files = extract_files_from_response(text)
+        assert len(files) >= 1, files
+        # Either format should produce files
+        all_content = ' '.join(files.values())
+        assert 'def foo' in all_content or 'console.log' in all_content
+
+    @test("generate_code_from_brief fails gracefully when no API key")
+    def _():
+        from code_generator import generate_code_from_brief
+        os.environ['OPENROUTER_API_KEY'] = ''
+        result = generate_code_from_brief('test brief')
+        assert result['success'] is False
+        assert 'OPENROUTER_API_KEY' in result['error'] or 'not set' in result['error'].lower()
+        assert result['files'] == {}
+
+    @test("write_generated_files creates files on disk")
+    def _():
+        from code_generator import write_generated_files
+        files = {
+            'src/main.py': '# test',
+            'README.md': '# Hi',
+            '../escape.py': '# bad',  # should be skipped
+        }
+        result = write_generated_files(99999, files, 'test-project')
+        assert result['count'] == 2  # escape.py should be skipped
+        assert os.path.isdir(result['project_dir'])
+        assert os.path.isfile(os.path.join(result['project_dir'], 'src', 'main.py'))
+        # Cleanup
+        import shutil
+        shutil.rmtree(result['project_dir'], ignore_errors=True)
+
+    @test("code_generator module imports without error")
+    def _():
+        import code_generator
+        assert hasattr(code_generator, 'generate_code_from_brief')
+        assert hasattr(code_generator, 'write_generated_files')
+        assert hasattr(code_generator, 'build_project')
+
+
+# ----------------------------------------------------------------------------
+# Notifier tests
 # ----------------------------------------------------------------------------
 
 def main():
@@ -416,6 +489,7 @@ def main():
     t_generator()
     t_config()
     t_notifier()
+    t_code_generator()
 
     print()
     print("=" * 60)

@@ -155,6 +155,7 @@ function renderCard(opp) {
       <div class="actions" onclick="event.stopPropagation();">
         <button class="btn btn-ghost" onclick="openAnalysis(${oppId})">🔍 Analyze</button>
         <button class="btn btn-success" onclick="approve(${oppId})">✅ Approve</button>
+        <button class="btn btn-primary btn-icon" onclick="buildNow(${oppId})" title="Run AI code generation (requires OPENROUTER_API_KEY)">🤖 Build</button>
         <button class="btn btn-danger btn-icon" onclick="reject(${oppId})" title="Reject">❌</button>
         <button class="btn btn-ghost btn-icon" onclick="ignore(${oppId})" title="Ignore">🔕</button>
       </div>
@@ -332,6 +333,39 @@ async function ignore(id) {
   const r = await API(`/api/opportunities/${id}/ignore`, { method: 'POST' });
   if (r.ok) { toast(`#${id} ignored`, 'info'); loadOpportunities(); loadStats(); }
   else toast('Ignore failed', 'error');
+}
+
+async function buildNow(id) {
+  if (!confirm(`🤖 Trigger AI code generation for #${id}?\n\nThis calls the configured LLM (OpenRouter, NVIDIA NIM, or custom endpoint) to write the actual source code. Takes 1-3 minutes.\n\nRequires OPENROUTER_API_KEY (or compatible) to be set in the server's env vars.`)) {
+    return;
+  }
+  toast('🤖 AI build started...', 'info');
+  const r = await API(`/api/opportunities/${id}/build`, { method: 'POST' });
+  if (r.ok) {
+    toast(`Build running for #${id}. Watch build log for progress.`, 'success');
+    // Poll build status every 5s for 60s
+    let checks = 0;
+    const poll = setInterval(async () => {
+      checks++;
+      const stat = await API('/api/build/status');
+      if (stat.ok && stat.data.some(b => b.id === id && b.build_status === 'complete')) {
+        clearInterval(poll);
+        toast(`✅ Build complete for #${id}!`, 'success');
+        loadOpportunities();
+        loadStats();
+      } else if (stat.ok && stat.data.some(b => b.id === id && b.build_status === 'failed')) {
+        clearInterval(poll);
+        toast(`❌ Build failed for #${id} — check logs`, 'error');
+        loadOpportunities();
+      } else if (checks >= 12) {
+        clearInterval(poll);
+        toast(`⏳ Build still running for #${id} (5 min)`, 'info');
+        loadOpportunities();
+      }
+    }, 5000);
+  } else {
+    toast('Build trigger failed: ' + (r.data?.error || r.status), 'error');
+  }
 }
 
 async function triggerScan() {
