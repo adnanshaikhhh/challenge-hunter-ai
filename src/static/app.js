@@ -3,10 +3,23 @@
    Vanilla JS, no build step. Talks to /api/*.
    ============================================================================= */
 
-const API = (path, opts = {}) => fetch(path, {
-  headers: { 'Content-Type': 'application/json' },
-  ...opts
-}).then(r => r.json().then(data => ({ ok: r.ok, status: r.status, data })));
+const API = async (path, opts = {}) => {
+  try {
+    const r = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts
+    });
+    let data = null;
+    try {
+      data = await r.json();
+    } catch (_) {
+      data = { error: 'invalid JSON response' };
+    }
+    return { ok: r.ok, status: r.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, data: { error: err.message } };
+  }
+};
 
 const state = {
   view: 'dashboard',
@@ -67,31 +80,45 @@ const aiPolicyClass = (p) => ({
 function renderCard(opp) {
   const tags = (opp.tags || '').split(',').filter(Boolean).slice(0, 5)
     .map(t => `<span class="tag">#${escapeHtml(t.trim())}</span>`).join('');
-  const scoreColor = opp.opportunity_score >= 70 ? 'var(--accent-green)'
-    : opp.opportunity_score >= 50 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+  const score = opp.opportunity_score || 0;
+  const winProb = opp.win_probability || 0;
+  const scoreColor = score >= 70 ? 'var(--accent-green)'
+    : score >= 50 ? 'var(--accent-yellow)' : 'var(--accent-red)';
   const scoreCircum = 2 * Math.PI * 24;
-  const scoreOffset = scoreCircum * (1 - (opp.opportunity_score || 0) / 100);
+  const scoreOffset = scoreCircum * (1 - score / 100);
   const winCircum = 2 * Math.PI * 24;
-  const winOffset = winCircum * (1 - (opp.win_probability || 0) / 100);
+  const winOffset = winCircum * (1 - winProb / 100);
+  const oppId = opp.id || 0;
+  const oppName = escapeHtml(opp.name || 'Untitled');
+  const oppUrl = escapeHtml(opp.url || '#');
+  const oppSource = escapeHtml(opp.source || 'unknown');
+  const oppStatus = escapeHtml(opp.status || 'pending');
+  const oppPolicy = escapeHtml(opp.ai_policy || 'unclear');
+  const oppDiff = escapeHtml(opp.difficulty || 'medium');
+  const oppPrize = Number(opp.prize_usd || 0);
+  const oppEv = Number(opp.expected_value || 0);
+  const oppDays = Number(opp.days_remaining || 0);
+  const oppDeadline = escapeHtml(opp.deadline || '');
+  const oppRules = escapeHtml(opp.rules_summary || '').slice(0, 160);
 
   return `
-    <div class="opp-card ${scoreClass(opp.opportunity_score || 0)}" data-id="${opp.id}">
+    <div class="opp-card ${scoreClass(score)}" data-id="${oppId}">
       <div class="header">
-        <span class="source-badge">${escapeHtml(opp.source || 'unknown')}</span>
+        <span class="source-badge">${oppSource}</span>
         <span class="status-dot-inline">
           <span class="status-dot ${opp.status === 'pending' ? 'idle' : ''}"></span>
-          ${escapeHtml(opp.status || 'pending')}
+          ${oppStatus}
         </span>
       </div>
-      <h3 class="name">${escapeHtml(opp.name)}</h3>
+      <h3 class="name">${oppName}</h3>
       <div class="prize-block">
-        <span class="amount">${fmtMoney(opp.prize_usd)}</span>
-        <span class="ev">EV ${fmtMoney(opp.expected_value)}</span>
+        <span class="amount">${fmtMoney(oppPrize)}</span>
+        <span class="ev">EV ${fmtMoney(oppEv)}</span>
       </div>
-      <div class="deadline ${deadlineClass(opp.days_remaining)}">
+      <div class="deadline ${deadlineClass(oppDays)}">
         <span>⏱</span>
-        <span>${fmtDays(opp.days_remaining)} remaining</span>
-        <span class="countdown">${opp.deadline || ''}</span>
+        <span>${fmtDays(oppDays)} remaining</span>
+        <span class="countdown">${oppDeadline}</span>
       </div>
       <div class="score-row">
         <div class="gauge" title="Opportunity score">
@@ -103,7 +130,7 @@ function renderCard(opp) {
               stroke-dashoffset="${scoreOffset}"
               stroke-linecap="round"/>
           </svg>
-          <div class="label">${opp.opportunity_score || 0}</div>
+          <div class="label">${score}</div>
           <div class="small-label">score</div>
         </div>
         <div class="gauge" title="Win probability">
@@ -115,21 +142,21 @@ function renderCard(opp) {
               stroke-dashoffset="${winOffset}"
               stroke-linecap="round"/>
           </svg>
-          <div class="label">${opp.win_probability || 0}%</div>
+          <div class="label">${winProb}%</div>
           <div class="small-label">win</div>
         </div>
         <div style="flex:1; text-align:right; font-size:11px; color:var(--text-muted);">
-          <div>AI: <strong>${escapeHtml(opp.ai_policy || 'unclear')}</strong></div>
-          <div style="margin-top:4px;">${escapeHtml(opp.difficulty || 'medium')}</div>
+          <div>AI: <strong>${oppPolicy}</strong></div>
+          <div style="margin-top:4px;">${oppDiff}</div>
         </div>
       </div>
-      <div class="tags">${tags}<span class="${aiPolicyClass(opp.ai_policy)}">AI ${escapeHtml(opp.ai_policy || 'unclear')}</span></div>
-      <div class="summary">${escapeHtml(opp.rules_summary || '').slice(0, 160)}</div>
+      <div class="tags">${tags}<span class="${aiPolicyClass(opp.ai_policy)}">AI ${oppPolicy}</span></div>
+      <div class="summary">${oppRules}</div>
       <div class="actions">
-        <button class="btn btn-ghost" onclick="openAnalysis(${opp.id})">🔍 Analyze</button>
-        <button class="btn btn-success" onclick="approve(${opp.id})">✅ Approve</button>
-        <button class="btn btn-danger btn-icon" onclick="reject(${opp.id})" title="Reject">❌</button>
-        <button class="btn btn-ghost btn-icon" onclick="ignore(${opp.id})" title="Ignore">🔕</button>
+        <button class="btn btn-ghost" onclick="openAnalysis(${oppId})">🔍 Analyze</button>
+        <button class="btn btn-success" onclick="approve(${oppId})">✅ Approve</button>
+        <button class="btn btn-danger btn-icon" onclick="reject(${oppId})" title="Reject">❌</button>
+        <button class="btn btn-ghost btn-icon" onclick="ignore(${oppId})" title="Ignore">🔕</button>
       </div>
     </div>
   `;
@@ -269,15 +296,35 @@ async function triggerScan() {
 // Analysis modal
 // -----------------------------------------------------------------------------
 async function openAnalysis(id) {
-  const r = await API(`/api/opportunities/${id}`);
-  if (!r.ok) return;
+  let r;
+  try {
+    r = await API(`/api/opportunities/${id}`);
+  } catch (err) {
+    toast(`Failed to load: ${err.message}`, 'error');
+    console.error('openAnalysis fetch error:', err);
+    return;
+  }
+  if (!r.ok) {
+    toast(`Failed to load opportunity #${id}: ${r.status}`, 'error');
+    console.error('openAnalysis API error:', r);
+    return;
+  }
   const opp = r.data;
+  if (!opp || !opp.id) {
+    toast('Opportunity data is empty', 'error');
+    return;
+  }
   const a = opp.analysis_json || {};
   const rp = a.recommended_project || {};
 
   const modal = document.getElementById('modal');
-  if (!modal) return;
-  document.getElementById('modal-sidebar').innerHTML = `
+  if (!modal) {
+    toast('Modal element not found in DOM', 'error');
+    return;
+  }
+  let sidebarHTML, bodyHTML;
+  try {
+    sidebarHTML = `
     <h2 style="margin:0 0 1rem; font-size:18px;">${escapeHtml(opp.name)}</h2>
     <div class="prize-block"><span class="amount">${fmtMoney(opp.prize_usd)}</span><span class="ev">EV ${fmtMoney(opp.expected_value)}</span></div>
     <div class="deadline ${deadlineClass(opp.days_remaining)}" style="margin:1rem 0;">
@@ -328,7 +375,9 @@ async function openAnalysis(id) {
   const techAll = [...(tech.frontend || []), ...(tech.backend || []),
     ...(tech.database || []), ...(tech.ai || []), ...(tech.deployment || [])];
 
-  document.getElementById('modal-body').innerHTML = `
+  document.getElementById('modal-body');  // keep ref so older browsers don't strip
+
+  bodyHTML = `
     <div class="section callout">
       <h3>Summary</h3>
       <p>${escapeHtml(a.summary || 'No analysis yet.')}</p>
@@ -383,7 +432,13 @@ async function openAnalysis(id) {
       <p>${escapeHtml(a.action_reasoning || '')}</p>
     </div>
   `;
-  modal.classList.add('show');
+    document.getElementById('modal-sidebar').innerHTML = sidebarHTML;
+    document.getElementById('modal-body').innerHTML = bodyHTML;
+    modal.classList.add('show');
+  } catch (err) {
+    console.error('Modal render failed:', err);
+    toast(`Failed to render analysis: ${err.message}`, 'error');
+  }
 }
 
 function closeModal() {
