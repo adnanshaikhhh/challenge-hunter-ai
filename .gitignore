@@ -1,36 +1,21 @@
-# Environment
-.env
-*.env
+# Auto-generated build folder
+projects/
+opportunities.db
+*.db
+*.db-journal
 
 # Python
 __pycache__/
 *.py[cod]
-*.so
-.Python
 *.egg-info/
-.eggs/
-dist/
-build/
-
-# Database (runtime, seeded locally)
-*.db
-
-# Node (if any)
-node_modules/
-
-# Logs
-*.log
+.venv/
+venv/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# IDE
+# Editors
 .vscode/
 .idea/
-
-# Railway (local state)
-.railway/
-
-# Next.js artifacts (from parent project)
-.next/
+*.swp

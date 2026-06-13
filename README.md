@@ -1,189 +1,212 @@
-# 🎯 Challenge Hunter AI
+# ⚡ Challenge Hunter AI v2.0
 
-> Autonomous opportunity-hunting platform for AI-friendly
-> hackathons, grants, and builder competitions worldwide.
+> **Autonomous opportunity detection and execution platform.**
+> Discovers hackathons, grants, and bounties 24/7. Scores them. Notifies you. Builds the winning project and submits it — all on autopilot.
 
-## Live Demo
+![v2.0](https://img.shields.io/badge/version-2.0.0-6366f1) ![python](https://img.shields.io/badge/python-3.11+-3b82f6) ![license](https://img.shields.io/badge/license-MIT-10b981) ![status](https://img.shields.io/badge/status-running-f59e0b)
 
-**[🚀 Railway Deployment](https://challenge-hunter-ai.up.railway.app)**
+---
 
-## Features
+## ✨ What's new in v2.0
 
-- **Autonomous Discovery** — Scans 8+ platforms for new AI-friendly opportunities
-- **AI-Powered Scoring** — Calculates opportunity score (0-100) and win probability using formula-based analysis
-- **Telegram Alerts** — Instant notifications when high-value opportunities (score ≥ 70) are found
-- **Project Generator** — One-click approval generates 5 project files: README, architecture, task list, demo plan, and submission checklist
-- **Full Web Dashboard** — Dark-themed, glassmorphism UI with filter/sort/search, live stats, and analysis modal
-- **Scheduled Scanning** — Automatic scans every 6 hours via APScheduler background worker
-- **Demo Mode** — Pre-seeded with 3 realistic opportunities for immediate testing
+- **5 autonomous layers**: discovery → intelligence → notification → approval → build + submit
+- **30+ discovery sources**: Devpost, MLH, HuggingFace, Solana, Replit, Kaggle, GitHub, OpenAI, Anthropic, AWS, GCP, Microsoft, Vercel, Gitcoin, Base, NEAR, YC, ProductHunt, **plus DuckDuckGo search**
+- **24/7 scanning** without your laptop: Railway + Render + GitHub Actions + UptimeRobot (all free)
+- **Telegram bot** with 18 commands (`/list`, `/scan`, `/approve_3`, `/analyze_5`, `/top5`, `/urgent`, etc.)
+- **Multi-channel notifications**: Telegram (primary), Discord webhook, ntfy.sh phone push
+- **Autonomous build agent** that creates GitHub repos, writes code, runs tests, audits security, deploys
+- **Elite dark dashboard** with glassmorphism, animated gauges, full modals, analytics
+- **AI analysis engine** with OpenAI support + deterministic fallback
+- **Auto-submit** for known platforms + Hermes session briefs for manual finish
 
-## Quick Start
+---
+
+## 🚀 Quick start (local)
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/adnanshaikhhh/challenge-hunter-ai.git
-cd challenge-hunter-ai
-
-# 2. Install Python dependencies
-pip install -r src/requirements.txt
-
-# 3. Set up environment
-cp src/.env.example src/.env
-# Edit src/.env with your TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
-
-# 4. Create and seed database
-python src/seed.py
-
-# 5. Run the app
-python src/app.py
-
-# 6. Open in browser
-open http://localhost:5000
+git clone https://github.com/YOUR_USERNAME/challenge-hunter-ai.git
+cd challenge-hunter-ai/src
+python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+cp ../.env.example ../.env                          # fill in Telegram token
+python seed.py                                      # initial data
+python app.py                                       # http://localhost:5000
 ```
 
-## Tech Stack
+---
 
-| Component | Technology |
-|-----------|------------|
-| Backend | Flask 2.3+ with flask-cors |
-| Database | SQLite (opportunities.db) |
-| Scheduler | APScheduler (BackgroundScheduler, 6h interval) |
-| Telegram | python-telegram-bot v20+ |
-| Web Scraping | requests + BeautifulSoup4 |
-| HTTP Client | requests + lxml parser |
-| Frontend | Vanilla HTML/CSS/JS (no build tools) |
-| Deployment | Railway / Render |
+## ☁️ Deploy free to Railway (primary)
 
-## Architecture
+1. Push the repo to GitHub.
+2. Go to [railway.app](https://railway.app), sign in with GitHub.
+3. **New Project** → **Deploy from GitHub repo** → pick this repo.
+4. Add environment variables: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, etc.
+5. Railway auto-detects the `Procfile` and starts Gunicorn.
+6. Once live, visit `https://your-app.up.railway.app/health` — you should see `{"status":"ok"}`.
+
+Database and seed data initialise automatically on first request.
+
+---
+
+## 🌐 Deploy free to Render (fallback)
+
+1. Sign in at [render.com](https://render.com) with GitHub.
+2. **New** → **Blueprint** → pick this repo.
+3. Render reads `render.yaml` and provisions the service.
+4. **Important**: free Render spins down after 15 min of inactivity. Add [UptimeRobot](https://uptimerobot.com) and point it at `https://your-app.onrender.com/health` to keep it awake.
+
+---
+
+## 🤖 Enable 24/7 GitHub Actions scanner
+
+This is the belt-and-braces backup: even if Railway is down, the scanner runs every 6 hours on GitHub's free infrastructure.
+
+1. In your GitHub repo, go to **Settings** → **Secrets and variables** → **Actions**.
+2. Add:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_CHAT_ID`
+   - `NTFY_TOPIC` (optional)
+
+The workflow at `.github/workflows/scanner.yml` runs every 6 hours, fetches opportunities, and notifies you.
+
+---
+
+## 🛎 UptimeRobot setup (keeps Render alive)
+
+1. Create a free account at [uptimerobot.com](https://uptimerobot.com).
+2. **Add New Monitor** → **HTTP(s)**.
+3. URL: `https://your-app.onrender.com/health`
+4. Interval: 5 minutes.
+5. The monitor pings every 5 minutes, keeping Render's free tier awake.
+
+---
+
+## 📱 Telegram bot setup
+
+1. Open Telegram, message [@BotFather](https://t.me/BotFather).
+2. `/newbot` → follow prompts → copy the **token**.
+3. Message [@userinfobot](https://t.me/userinfobot) to get your **chat ID**.
+4. Set both as environment variables in Railway/Render/GitHub.
+5. Send `/start` to your bot — it'll reply with the command list.
+
+### Available commands
+
+| Command | What it does |
+|---|---|
+| `/list` | Top 10 pending by score |
+| `/approved` | List approved |
+| `/building` | List currently building |
+| `/submitted` | List submitted entries |
+| `/stats` | Full dashboard stats |
+| `/scan` | Trigger manual scan |
+| `/digest` | Send daily digest now |
+| `/approve_<id>` | Approve + start auto build |
+| `/reject_<id>` | Reject |
+| `/ignore_<id>` | Ignore |
+| `/analyze_<id>` | Send full analysis |
+| `/submit_<id>` | Manually trigger submit |
+| `/build_status` | All active builds |
+| `/top5` | Top 5 by expected value |
+| `/urgent` | < 7 days remaining |
+| `/new` | Added in last 24 h |
+
+---
+
+## 🧠 How it works
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                       Challenge Hunter v2.0                      │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Layer 1 ─ DISCOVERY       30+ sources + DuckDuckGo queries      │
+│     ↓                                                            │
+│  Layer 2 ─ INTELLIGENCE    Score • Analyse • Prioritise          │
+│     ↓                                                            │
+│  Layer 3 ─ NOTIFICATION    Telegram + Discord + ntfy             │
+│     ↓                                                            │
+│  Layer 4 ─ APPROVAL        /approve_3  OR  click on dashboard    │
+│     ↓                                                            │
+│  Layer 5 ─ BUILD + SUBMIT  GitHub repo • code • tests • deploy   │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the deep dive.
+
+---
+
+## 🧪 Run the test suite
+
+```bash
+cd src
+python run_tests.py
+```
+
+You should see `XX tests passed, 0 failed` before deploying.
+
+---
+
+## 🛠 Stack
+
+- **Backend:** Python 3.11, Flask, APScheduler, SQLite
+- **Frontend:** Vanilla JS + Inter + JetBrains Mono, no build step
+- **Scraper:** requests + BeautifulSoup + lxml
+- **Notifications:** Telegram Bot API, Discord webhooks, ntfy.sh
+- **Hosting:** Railway (primary), Render (fallback), GitHub Actions (cron)
+
+All free. No paid services.
+
+---
+
+## 📂 Project structure
 
 ```
 challenge-hunter-ai/
 ├── src/
-│   ├── app.py           # Flask backend, all API endpoints
-│   ├── scanner.py       # Discovery engine, scoring, AI analysis
-│   ├── telegram_bot.py  # Telegram bot handler + commands
-│   ├── generator.py     # Project file generator (5 files)
-│   ├── seed.py          # Database seeder with 3 starter opportunities
-│   ├── schema.sql       # SQLite schema (3 tables)
-│   ├── requirements.txt # All Python dependencies
+│   ├── app.py             ← Flask backend
+│   ├── scanner.py         ← Discovery engine
+│   ├── analyzer.py        ← AI analysis (OpenAI + fallback)
+│   ├── scorer.py          ← Pure scoring functions
+│   ├── notifier.py        ← Telegram + Discord + ntfy
+│   ├── generator.py       ← Project file generator
+│   ├── auto_builder.py    ← Autonomous build agent
+│   ├── scheduler.py       ← APScheduler wrapper
+│   ├── config.py          ← All settings
+│   ├── schema.sql         ← DB schema
+│   ├── seed.py            ← Initial seed data
+│   ├── run_tests.py       ← Test suite
+│   ├── gunicorn_config.py ← Gunicorn hooks
 │   ├── templates/
-│   │   └── index.html   # Full dashboard UI (1526 lines)
-│   └── opportunities.db # SQLite database (created at runtime)
-├── docs/
-│   └── RECOVERY.md      # Project status and architecture docs
-├── deploy/
-│   ├── render.yaml      # Render deployment configuration
-│   ├── Procfile         # Railway/Render start command
-│   └── runtime.txt      # Python version (3.11.0)
-└── github/
-    └── (git repository initialized here)
+│   │   └── index.html     ← Dashboard HTML
+│   └── static/
+│       ├── style.css      ← Elite dark UI
+│       └── app.js         ← Frontend logic
+├── projects/              ← Auto-generated project folders
+├── .github/workflows/
+│   ├── scanner.yml        ← 24/7 free scanner
+│   └── tests.yml          ← Run tests on push
+├── Procfile
+├── runtime.txt
+├── render.yaml
+├── .env.example
+├── README.md
+├── ARCHITECTURE.md
+└── LICENSE
 ```
 
-## Environment Variables
+---
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Yes | — | From @BotFather on Telegram |
-| `TELEGRAM_CHAT_ID` | Yes | — | Your personal Telegram chat ID |
-| `SCAN_INTERVAL_HOURS` | No | 6 | Hours between automatic scans |
-| `MIN_PRIZE_USD` | No | 500 | Minimum prize to track |
-| `MIN_SCORE_FOR_ALERT` | No | 70 | Score threshold for Telegram alert |
-| `FLASK_ENV` | No | production | `production` or `development` |
-| `SECRET_KEY` | No | (unsafe default) | Change to random string in production |
-| `PORT` | No | 5000 | Server port |
-| `DB_PATH` | No | (local) | Path to SQLite database |
+## 🔒 Security
 
-## Deploy to Railway
+- No secrets in code — all via env vars.
+- No PII logged.
+- Rate-limited outbound HTTP.
+- Optional `bandit` security scan in CI.
+- SQLite by default — switch to Postgres for multi-tenant.
 
-Railway is the recommended platform (free tier available):
+---
 
-```bash
-# 1. Install Railway CLI
-npm install -g @railway/cli
+## 📄 License
 
-# 2. Login
-railway login
-
-# 3. Initialize project
-cd challenge-hunter-ai
-railway init
-
-# 4. Link to existing folder
-railway up --select
-
-# 5. Add environment variables
-railway variables set TELEGRAM_BOT_TOKEN=your_token
-railway variables set TELEGRAM_CHAT_ID=your_chat_id
-
-# 6. Deploy
-railway up
-
-# 7. Get public URL
-railway domain
-```
-
-## Deploy to Render (Alternative)
-
-```bash
-# Connect GitHub repo to Render.com
-# Use render.yaml from deploy/ folder
-# Or use these settings:
-#   Build Command: pip install -r src/requirements.txt
-#   Start Command: gunicorn src.app:app --bind 0.0.0.0:$PORT --workers 2
-```
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Serve dashboard UI |
-| GET | `/health` | Health check |
-| GET | `/api/opportunities` | List opportunities (filter: status, min_score, sort_by) |
-| GET | `/api/opportunities/<id>` | Get full opportunity details |
-| POST | `/api/opportunities/<id>/approve` | Approve + generate project files |
-| POST | `/api/opportunities/<id>/reject` | Reject opportunity |
-| POST | `/api/opportunities/<id>/ignore` | Ignore opportunity |
-| POST | `/api/scan` | Trigger manual scan |
-| GET | `/api/stats` | Dashboard statistics |
-| GET | `/api/projects/<id>/files` | List generated files |
-| GET | `/api/projects/<id>/file/<filename>` | Get file content |
-
-## Telegram Bot Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Welcome message |
-| `/list` | Top 5 opportunities by score |
-| `/stats` | Dashboard statistics |
-| `/scan` | Trigger manual scan |
-| `/help` | All commands |
-
-Inline buttons on alerts: ✅ Approve | ❌ Reject | 🔕 Ignore
-
-## Scoring System
-
-**Opportunity Score (0-100):**
-- Base: 50
-- Prize > $10K → +15 | $5K-10K → +10 | $1K-5K → +5
-- Deadline 14-45 days → +10 | 7-13 days → +5
-- AI policy allowed → +15 | unclear → -15
-- Solo allowed → +5 | Global → +5
-- Team-only → -10 | Corporate sponsor → -10
-
-**Win Probability (0-100):**
-- Base: 30
-- Prize > $5K → +10 | Days remaining > 14 → +10
-- AI policy allowed → +15 | Difficulty easy → +10 | hard → -10
-- Corporate sponsor → -20 | Team-only → -10
-
-## Database Schema
-
-```sql
-opportunities   -- Discovered hackathons/grants/competitions
-project_files    -- Generated project plans per approved opportunity
-scan_log         -- Scanner execution history
-```
-
-## License
-
-MIT License — use freely for your submissions.
+MIT

@@ -1,650 +1,549 @@
 #!/usr/bin/env python3
 """
-Challenge Hunter AI - Flask Backend
-All API endpoints for opportunity management, scanning, and Telegram integration.
+Challenge Hunter AI v2.0 — Flask Backend
+All API endpoints, DB init at module load, Gunicorn-safe.
 """
 
+from __future__ import annotations
+
+import json
 import os
 import sqlite3
-import json
-import time
+import threading
+import uuid
 from datetime import datetime, timedelta
-from functools import wraps
-import re
+from typing import Any, Dict, List, Optional
 
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import (
+    Flask, jsonify, render_template, request, send_from_directory
+)
 from flask_cors import CORS
 
-# Import our modules
-from scanner import ScannerEngine
+from auto_builder import run_build_async
+from config import (
+    APP_NAME, APP_TAGLINE, DEBUG, DB_PATH, HOST, PORT, SCHEMA_PATH, SECRET_KEY, VERSION
+)
 from generator import ProjectFileGenerator
-from telegram_bot import TelegramBotHandler
+from notifier import (
+    build_complete as notif_build_complete, build_started as notif_build_started,
+    daily_digest, high_value_alert, info as notif_info, submitted as notif_submitted
+)
+from scanner import ScannerEngine
+from scorer import (
+    calculate_expected_value, calculate_opportunity_score, calculate_win_probability
+)
+
 
 # =============================================================================
-# CONFIGURATION
+# Database bootstrap (runs on import — works under Gunicorn)
 # =============================================================================
 
-DB_PATH = os.environ.get('DB_PATH', os.path.join(os.path.dirname(__file__), 'opportunities.db'))
-PORT = int(os.environ.get('PORT', 5000))
-DEBUG = os.environ.get('FLASK_ENV', 'production') == 'development'
-
-# =============================================================================
-# DATABASE INITIALIZATION (runs on module load - works with Gunicorn)
-# =============================================================================
-
-def init_database():
-    """Initialize database with schema and seed data if not exists. Called on module load."""
-    schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
-    
-    # Check if database exists
-    db_exists = os.path.exists(DB_PATH)
-    
-    if not db_exists:
-        print(f"📦 Database not found at {DB_PATH}")
-        print("   Initializing new database...")
-        
-        # Create database and schema
-        conn = sqlite3.connect(DB_PATH)
-        
-        if os.path.exists(schema_path):
-            with open(schema_path, 'r') as f:
-                schema_sql = f.read()
-            conn.executescript(schema_sql)
-            print("   ✅ Schema created")
-        else:
-            # Fallback: create tables manually
-            _create_schema_manually(conn)
-            print("   ✅ Schema created (manual)")
-        
-        conn.commit()
-        conn.close()
-        
-        # Seed initial data
-        _seed_initial_data()
-        print("   ✅ Seed data inserted")
-        print("   ✅ Database initialization complete")
-    else:
-        print(f"📊 Database found at {DB_PATH}")
-
-def _create_schema_manually(conn):
-    """Create schema tables manually if schema.sql not found"""
-    cursor = conn.cursor()
-    cursor.executescript("""
-        CREATE TABLE IF NOT EXISTS opportunities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            url TEXT UNIQUE NOT NULL,
-            prize_usd INTEGER DEFAULT 0,
-            deadline TEXT,
-            days_remaining INTEGER,
-            rules_summary TEXT,
-            ai_policy TEXT DEFAULT 'unclear',
-            eligibility TEXT,
-            difficulty TEXT DEFAULT 'medium',
-            opportunity_score INTEGER DEFAULT 0,
-            win_probability INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
-            analysis_json TEXT,
-            source TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-        
-        CREATE TABLE IF NOT EXISTS project_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            opportunity_id INTEGER REFERENCES opportunities(id),
-            filename TEXT,
-            content TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-        
-        CREATE TABLE IF NOT EXISTS scan_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            scan_time TEXT DEFAULT (datetime('now')),
-            sources_scanned INTEGER,
-            new_found INTEGER,
-            errors TEXT
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_opportunities_status ON opportunities(status);
-        CREATE INDEX IF NOT EXISTS idx_opportunities_score ON opportunities(opportunity_score DESC);
-        CREATE INDEX IF NOT EXISTS idx_opportunities_deadline ON opportunities(deadline);
-        CREATE INDEX IF NOT EXISTS idx_opportunities_source ON opportunities(source);
-        CREATE INDEX IF NOT EXISTS idx_project_files_opportunity ON project_files(opportunity_id);
-    """)
-
-def _seed_initial_data():
-    """Insert seed data if database is empty"""
+def _ensure_db() -> None:
+    """Create schema and seed if missing. Idempotent."""
+    new_db = not os.path.exists(DB_PATH)
+    if new_db:
+        os.makedirs(os.path.dirname(DB_PATH) or '.', exist_ok=True)
+        print(f"📦 Creating new database at {DB_PATH}")
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Check if already seeded
-    cursor.execute("SELECT COUNT(*) FROM opportunities")
-    count = cursor.fetchone()[0]
-    if count > 0:
-        conn.close()
-        return
-    
-    today = datetime.now()
-    deadline_30 = (today + timedelta(days=30)).strftime('%Y-%m-%d')
-    deadline_21 = (today + timedelta(days=21)).strftime('%Y-%m-%d')
-    deadline_45 = (today + timedelta(days=45)).strftime('%Y-%m-%d')
-    
-    seed_records = [
-        {
-            'name': 'Devpost AI Innovation Challenge 2025',
-            'url': 'https://devpost.com/hackathons',
-            'prize_usd': 10000,
-            'deadline': deadline_30,
-            'ai_policy': 'allowed',
-            'difficulty': 'medium',
-            'source': 'Devpost',
-            'eligibility': 'Global, solo or team',
-            'rules_summary': 'Build innovative projects using AI tools. Any tech stack allowed. Submit a working demo and 2-minute video.',
-        },
-        {
-            'name': 'Hugging Face Open Source AI Grant',
-            'url': 'https://huggingface.co/grants',
-            'prize_usd': 5000,
-            'deadline': deadline_21,
-            'ai_policy': 'allowed',
-            'difficulty': 'easy',
-            'source': 'HuggingFace',
-            'eligibility': 'Global, solo',
-            'rules_summary': 'Create open source AI projects using Hugging Face tools. Must be fully open source with code public.',
-        },
-        {
-            'name': 'Solana Summer Builder Grant 2025',
-            'url': 'https://solana.com/grants',
-            'prize_usd': 25000,
-            'deadline': deadline_45,
-            'ai_policy': 'allowed',
-            'difficulty': 'hard',
-            'source': 'Solana',
-            'eligibility': 'Global, solo or team',
-            'rules_summary': 'Build on Solana blockchain. Must submit working product. Multiple grant tiers available up to $50K.',
-        },
-    ]
-    
-    def calc_score(prize_usd, days_rem, ai_pol, elig, diff, src):
-        score = 50
-        if prize_usd > 10000: score += 15
-        elif prize_usd >= 5000: score += 10
-        elif prize_usd >= 1000: score += 5
-        if days_rem and 14 <= days_rem <= 45: score += 10
-        elif days_rem and 7 <= days_rem < 14: score += 5
-        if ai_pol == 'allowed': score += 15
-        elif ai_pol == 'unclear': score -= 15
-        if elig:
-            if 'solo' in elig.lower(): score += 5
-            if 'global' in elig.lower(): score += 5
-            if 'team only' in elig.lower(): score -= 10
-        if diff == 'easy': score += 5
-        elif diff == 'hard': score -= 5
-        corp = ['google', 'microsoft', 'amazon', 'meta', 'apple', 'nvidia']
-        if src and any(s in src.lower() for s in corp): score -= 10
-        return max(0, min(100, score))
-    
-    def calc_prob(prize_usd, days_rem, ai_pol, diff, elig, src):
-        prob = 30
-        if prize_usd > 5000: prob += 10
-        if days_rem and days_rem > 14: prob += 10
-        if ai_pol == 'allowed': prob += 15
-        corp = ['google', 'microsoft', 'amazon', 'meta', 'apple', 'nvidia']
-        if src and any(s in src.lower() for s in corp): prob -= 20
-        if diff == 'easy': prob += 10
-        elif diff == 'hard': prob -= 10
-        if elig and 'solo' not in elig.lower(): prob -= 10
-        return max(0, min(100, prob))
-    
-    for record in seed_records:
-        deadline_dt = datetime.strptime(record['deadline'], '%Y-%m-%d')
-        days_rem = (deadline_dt - today).days
-        score = calc_score(record['prize_usd'], days_rem, record['ai_policy'], record['eligibility'], record['difficulty'], record['source'])
-        prob = calc_prob(record['prize_usd'], days_rem, record['ai_policy'], record['difficulty'], record['eligibility'], record['source'])
-        
-        analysis = {
-            "summary": f"A {record['difficulty']} opportunity with ${record['prize_usd']} prize.",
-            "requirements": ["Build a functional demo", "Submit before deadline", "Prepare video demo", "Write README"],
-            "risks": ["High competition", "Deadline pressure"],
-            "win_probability_reasoning": f"Based on {record['difficulty']} difficulty, ${record['prize_usd']} prize.",
-            "build_complexity": record['difficulty'],
-            "recommended_project": {"name": record['name'][:30].replace(' ', '-').lower(), "tech_stack": ["Python", "Flask", "React"]},
-            "submission_strategy": "Focus on demo quality and documentation.",
-            "recommended_action": "approve"
-        }
-        
-        try:
-            cursor.execute("""
-                INSERT INTO opportunities (
-                    name, url, prize_usd, deadline, days_remaining,
-                    rules_summary, ai_policy, eligibility, difficulty,
-                    opportunity_score, win_probability, status, analysis_json, source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                record['name'], record['url'], record['prize_usd'], record['deadline'], days_rem,
-                record.get('rules_summary', ''), record['ai_policy'], record['eligibility'],
-                record['difficulty'], score, prob, 'pending', json.dumps(analysis), record['source']
-            ))
-        except sqlite3.IntegrityError:
-            pass
-    
-    # Log the seed
-    cursor.execute("INSERT INTO scan_log (scan_time, sources_scanned, new_found, errors) VALUES (?, ?, ?, ?)",
-                   (datetime.now().isoformat(), 0, len(seed_records), None))
-    
-    conn.commit()
+    if new_db:
+        with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
+            conn.executescript(f.read())
+        print("   ✅ schema created")
     conn.close()
+    if new_db:
+        # auto-seed
+        from seed import seed_database
+        try:
+            n = seed_database()
+            print(f"   ✅ seeded {n} opportunities")
+        except Exception as e:
+            print(f"   ⚠️  seed failed: {e}")
 
-# Initialize database on module load (before Flask app creation)
-init_database()
+
+_ensure_db()
+
 
 # =============================================================================
-# FLASK APP SETUP
+# Flask app
 # =============================================================================
 
-app = Flask(__name__, template_folder='templates')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'challenge-hunter-secret-key-change-in-production')
+app = Flask(
+    __name__,
+    template_folder='templates',
+    static_folder='static'
+)
+app.config['SECRET_KEY'] = SECRET_KEY
 CORS(app)
 
+
 # =============================================================================
-# DATABASE HELPERS
+# Database helpers
 # =============================================================================
 
-def get_db_connection():
-    """Get a database connection with row factory for dict-like access"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_db():
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+    return c
 
 
-def row_to_dict(row):
-    """Convert sqlite3.Row to dictionary"""
+def row_to_dict(row) -> Optional[Dict[str, Any]]:
     if row is None:
         return None
-    return dict(row)
-
-
-def calculate_days_remaining(deadline_str):
-    """Calculate days remaining from deadline string"""
-    if not deadline_str:
-        return None
-    try:
-        deadline = datetime.strptime(deadline_str, '%Y-%m-%d')
-        delta = deadline - datetime.now()
-        return max(0, delta.days)
-    except ValueError:
-        return None
+    d = dict(row)
+    for k, v in list(d.items()):
+        if isinstance(v, str) and k.endswith('_json'):
+            try:
+                d[k] = json.loads(v)
+            except Exception:
+                pass
+    return d
 
 
 # =============================================================================
-# API ENDPOINTS
+# Frontend routes
 # =============================================================================
 
 @app.route('/')
 def index():
-    """Serve the main dashboard HTML"""
-    return render_template('index.html')
+    return render_template('index.html',
+                           app_name=APP_NAME, version=VERSION, tagline=APP_TAGLINE)
 
+
+@app.route('/static/<path:path>')
+def static_files(path):
+    return send_from_directory(app.static_folder, path)
+
+
+# =============================================================================
+# Health & meta
+# =============================================================================
 
 @app.route('/health')
 def health():
-    """Health check endpoint for hosting platform"""
     return jsonify({
         'status': 'ok',
-        'timestamp': datetime.now().isoformat(),
-        'service': 'Challenge Hunter AI'
+        'service': APP_NAME,
+        'version': VERSION,
+        'time': datetime.now().isoformat()
     })
 
 
+@app.route('/api/meta')
+def meta():
+    return jsonify({
+        'name': APP_NAME,
+        'version': VERSION,
+        'tagline': APP_TAGLINE,
+        'time': datetime.now().isoformat()
+    })
+
+
+# =============================================================================
+# Opportunities
+# =============================================================================
+
 @app.route('/api/opportunities', methods=['GET'])
-def get_opportunities():
-    """
-    GET /api/opportunities
-    Query params:
-      - status: filter by status (pending, approved, rejected, ignored, expired)
-      - min_score: minimum opportunity score
-      - sort_by: score | deadline | prize (default: score)
-    Returns JSON array of matching opportunities
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Build query
-    query = "SELECT * FROM opportunities WHERE 1=1"
-    params = []
-
-    # Filter by status
+def list_opportunities():
     status = request.args.get('status')
+    min_score = request.args.get('min_score', type=int)
+    sort_by = request.args.get('sort_by', 'score')
+    search = request.args.get('search')
+    tag = request.args.get('tag')
+    limit = request.args.get('limit', type=int)
+    offset = request.args.get('offset', type=int, default=0)
+
+    query = "SELECT * FROM opportunities WHERE 1=1"
+    params: List[Any] = []
     if status:
         query += " AND status = ?"
         params.append(status)
-
-    # Filter by minimum score
-    min_score = request.args.get('min_score', type=int)
     if min_score:
         query += " AND opportunity_score >= ?"
         params.append(min_score)
+    if search:
+        query += " AND (name LIKE ? OR rules_summary LIKE ?)"
+        s = f"%{search}%"
+        params.extend([s, s])
+    if tag:
+        query += " AND tags LIKE ?"
+        params.append(f"%{tag}%")
 
-    # Sorting
-    sort_by = request.args.get('sort_by', 'score')
     if sort_by == 'deadline':
         query += " ORDER BY days_remaining ASC"
     elif sort_by == 'prize':
         query += " ORDER BY prize_usd DESC"
+    elif sort_by == 'win':
+        query += " ORDER BY win_probability DESC"
+    elif sort_by == 'ev':
+        query += " ORDER BY expected_value DESC"
     else:
         query += " ORDER BY opportunity_score DESC"
 
+    if limit:
+        query += f" LIMIT {int(limit)} OFFSET {int(offset)}"
+
+    conn = get_db()
+    cursor = conn.cursor()
     cursor.execute(query, params)
     rows = cursor.fetchall()
+    cursor.execute("SELECT COUNT(*) AS c FROM opportunities WHERE 1=1" +
+                   (" AND status=?" if status else ""), params[:1] if status else [])
+    total = cursor.fetchone()['c']
     conn.close()
-
-    # Convert to list of dicts and add computed days_remaining
-    opportunities = []
-    for row in rows:
-        opp = row_to_dict(row)
-        if opp.get('deadline'):
-            opp['days_remaining'] = calculate_days_remaining(opp['deadline'])
-        # Parse analysis_json if string
-        if opp.get('analysis_json') and isinstance(opp['analysis_json'], str):
-            try:
-                opp['analysis_json'] = json.loads(opp['analysis_json'])
-            except json.JSONDecodeError:
-                pass
-        opportunities.append(opp)
-
-    return jsonify(opportunities)
-
-
-@app.route('/api/opportunities/<int:opportunity_id>', methods=['GET'])
-def get_opportunity(opportunity_id):
-    """
-    GET /api/opportunities/<id>
-    Returns full opportunity details with parsed analysis_json
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opportunity_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        return jsonify({'error': 'Opportunity not found'}), 404
-
-    opp = row_to_dict(row)
-    if opp.get('deadline'):
-        opp['days_remaining'] = calculate_days_remaining(opp['deadline'])
-
-    # Parse analysis_json
-    if opp.get('analysis_json') and isinstance(opp['analysis_json'], str):
-        try:
-            opp['analysis_json'] = json.loads(opp['analysis_json'])
-        except json.JSONDecodeError:
-            opp['analysis_json'] = None
-
-    return jsonify(opp)
-
-
-@app.route('/api/opportunities/<int:opportunity_id>/approve', methods=['POST'])
-def approve_opportunity(opportunity_id):
-    """
-    POST /api/opportunities/<id>/approve
-    Sets status to 'approved', generates project files, sends Telegram notification
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Get opportunity
-    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opportunity_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        conn.close()
-        return jsonify({'error': 'Opportunity not found'}), 404
-
-    opp = row_to_dict(row)
-
-    # Update status
-    cursor.execute("""
-        UPDATE opportunities
-        SET status = 'approved', updated_at = ?
-        WHERE id = ?
-    """, (datetime.now().isoformat(), opportunity_id))
-    conn.commit()
-
-    # Generate project files
-    generator = ProjectFileGenerator(DB_PATH)
-    files_created = generator.generate_all(opportunity_id, opp)
-    print(f"📄 Generated {files_created} project files for opportunity {opportunity_id}")
-
-    # Send Telegram notification
-    try:
-        telegram = TelegramBotHandler()
-        telegram.send_approval_notification(opp)
-        print(f"📱 Telegram notification sent for opportunity {opportunity_id}")
-    except Exception as e:
-        print(f"⚠️  Telegram notification failed: {e}")
-
-    conn.close()
-
     return jsonify({
-        'success': True,
-        'message': f'Opportunity approved. {files_created} project files generated.',
-        'files_created': files_created
+        'total': total,
+        'count': len(rows),
+        'items': [row_to_dict(r) for r in rows]
     })
 
 
-@app.route('/api/opportunities/<int:opportunity_id>/reject', methods=['POST'])
-def reject_opportunity(opportunity_id):
-    """
-    POST /api/opportunities/<id>/reject
-    Sets status to 'rejected'
-    """
-    conn = get_db_connection()
+@app.route('/api/opportunities/<int:opp_id>', methods=['GET'])
+def get_opportunity(opp_id):
+    conn = get_db()
     cursor = conn.cursor()
+    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(row_to_dict(row))
 
-    cursor.execute("""
-        UPDATE opportunities
-        SET status = 'rejected', updated_at = ?
-        WHERE id = ?
-    """, (datetime.now().isoformat(), opportunity_id))
+
+def _set_status(opp_id: int, status: str, **extra) -> Dict[str, Any]:
+    fields = {'status': status, 'updated_at': datetime.now().isoformat()}
+    fields.update(extra)
+    cols = ', '.join(f"{k} = ?" for k in fields.keys())
+    vals = list(fields.values()) + [opp_id]
+    conn = get_db()
+    conn.execute(f"UPDATE opportunities SET {cols} WHERE id = ?", vals)
     conn.commit()
     conn.close()
+    return fields
 
-    return jsonify({'success': True, 'message': 'Opportunity rejected'})
+
+@app.route('/api/opportunities/<int:opp_id>/approve', methods=['POST'])
+def approve_opportunity(opp_id):
+    fields = _set_status(opp_id, 'approved', build_status='in_progress')
+    # trigger auto build in background
+    run_build_async(opp_id)
+    return jsonify({'success': True, 'building': True, **fields})
 
 
-@app.route('/api/opportunities/<int:opportunity_id>/ignore', methods=['POST'])
-def ignore_opportunity(opportunity_id):
-    """
-    POST /api/opportunities/<id>/ignore
-    Sets status to 'ignored'
-    """
-    conn = get_db_connection()
+@app.route('/api/opportunities/<int:opp_id>/reject', methods=['POST'])
+def reject_opportunity(opp_id):
+    fields = _set_status(opp_id, 'rejected')
+    return jsonify({'success': True, **fields})
+
+
+@app.route('/api/opportunities/<int:opp_id>/ignore', methods=['POST'])
+def ignore_opportunity(opp_id):
+    fields = _set_status(opp_id, 'ignored')
+    return jsonify({'success': True, **fields})
+
+
+@app.route('/api/opportunities/<int:opp_id>/rescore', methods=['POST'])
+def rescore(opp_id):
+    conn = get_db()
     cursor = conn.cursor()
-
+    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'not found'}), 404
+    opp = dict(row)
+    score = calculate_opportunity_score(opp)
+    prob = calculate_win_probability(opp)
+    ev = calculate_expected_value(int(opp.get('prize_usd') or 0), prob)
     cursor.execute("""
         UPDATE opportunities
-        SET status = 'ignored', updated_at = ?
+        SET opportunity_score = ?, win_probability = ?, expected_value = ?, updated_at = ?
         WHERE id = ?
-    """, (datetime.now().isoformat(), opportunity_id))
+    """, (score, prob, ev, datetime.now().isoformat(), opp_id))
     conn.commit()
     conn.close()
+    return jsonify({'success': True, 'opportunity_score': score, 'win_probability': prob, 'expected_value': ev})
 
-    return jsonify({'success': True, 'message': 'Opportunity ignored'})
+
+# =============================================================================
+# Scanner endpoints
+# =============================================================================
+
+def _run_scan_thread(scan_id: str):
+    engine = ScannerEngine(DB_PATH)
+    engine.run_full_scan()
 
 
 @app.route('/api/scan', methods=['POST'])
 def trigger_scan():
-    """
-    POST /api/scan
-    Triggers the scanner engine manually
-    Returns count of new opportunities found
-    """
-    try:
-        scanner = ScannerEngine(DB_PATH)
-        result = scanner.run_full_scan()
-        return jsonify({
-            'success': True,
-            'new_found': result.get('new_found', 0),
-            'sources_scanned': result.get('sources_scanned', 0),
-            'errors': result.get('errors', [])
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    scan_id = str(uuid.uuid4())[:8]
+    t = threading.Thread(target=_run_scan_thread, args=(scan_id,), daemon=True)
+    t.start()
+    return jsonify({'triggered': True, 'scan_id': scan_id})
 
 
-@app.route('/api/stats', methods=['GET'])
-def get_stats():
-    """
-    GET /api/stats
-    Returns dashboard statistics
-    """
-    conn = get_db_connection()
+@app.route('/api/scan/status', methods=['GET'])
+def scan_status():
+    conn = get_db()
     cursor = conn.cursor()
-
-    # Total active (not rejected/ignored/expired)
-    cursor.execute("""
-        SELECT COUNT(*) as count FROM opportunities
-        WHERE status NOT IN ('rejected', 'ignored', 'expired')
-    """)
-    total_active = cursor.fetchone()['count']
-
-    # High priority (score >= 70)
-    cursor.execute("""
-        SELECT COUNT(*) as count FROM opportunities
-        WHERE opportunity_score >= 70 AND status NOT IN ('rejected', 'ignored', 'expired')
-    """)
-    high_priority = cursor.fetchone()['count']
-
-    # Average win probability
-    cursor.execute("""
-        SELECT AVG(win_probability) as avg FROM opportunities
-        WHERE status NOT IN ('rejected', 'ignored', 'expired')
-    """)
-    avg_win_prob = cursor.fetchone()['avg'] or 0
-
-    # Total prize pool (sum of all active opportunities)
-    cursor.execute("""
-        SELECT SUM(prize_usd) as total FROM opportunities
-        WHERE status NOT IN ('rejected', 'ignored', 'expired')
-    """)
-    total_prize = cursor.fetchone()['total'] or 0
-
-    # Last scan time
-    cursor.execute("""
-        SELECT scan_time FROM scan_log
-        ORDER BY scan_time DESC LIMIT 1
-    """)
-    last_scan_row = cursor.fetchone()
-    last_scan_time = last_scan_row['scan_time'] if last_scan_row else None
-
-    conn.close()
-
-    return jsonify({
-        'total_active': total_active,
-        'high_priority': high_priority,
-        'avg_win_probability': round(avg_win_prob, 1),
-        'total_prize_pool': total_prize,
-        'last_scan_time': last_scan_time
-    })
-
-
-@app.route('/api/projects/<int:opportunity_id>/files', methods=['GET'])
-def get_project_files(opportunity_id):
-    """
-    GET /api/projects/<opportunity_id>/files
-    Returns list of generated filenames for that opportunity
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT id, filename, created_at FROM project_files
-        WHERE opportunity_id = ?
-        ORDER BY created_at
-    """, (opportunity_id,))
-
-    rows = cursor.fetchall()
-    conn.close()
-
-    files = [row_to_dict(row) for row in rows]
-    return jsonify(files)
-
-
-@app.route('/api/projects/<int:opportunity_id>/file/<filename>', methods=['GET'])
-def get_project_file(opportunity_id, filename):
-    """
-    GET /api/projects/<opportunity_id>/file/<filename>
-    Returns file content as plain text
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT content FROM project_files
-        WHERE opportunity_id = ? AND filename = ?
-    """, (opportunity_id, filename))
-
+    cursor.execute("SELECT * FROM scan_log ORDER BY id DESC LIMIT 1")
     row = cursor.fetchone()
     conn.close()
-
     if not row:
-        return jsonify({'error': 'File not found'}), 404
-
-    return row['content'], 200, {'Content-Type': 'text/plain; charset=utf-8'}
+        return jsonify({'status': 'never_run'})
+    return jsonify(row_to_dict(row))
 
 
 # =============================================================================
-# ERROR HANDLERS
+# Stats / Analytics
+# =============================================================================
+
+@app.route('/api/stats', methods=['GET'])
+def stats():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) AS c FROM opportunities
+        WHERE status NOT IN ('rejected','ignored','expired')
+    """)
+    total_active = cursor.fetchone()['c']
+    cursor.execute("""
+        SELECT COUNT(*) AS c FROM opportunities
+        WHERE opportunity_score >= 70 AND status NOT IN ('rejected','ignored','expired')
+    """)
+    high_priority = cursor.fetchone()['c']
+    cursor.execute("SELECT COUNT(*) AS c FROM opportunities WHERE status = 'approved'")
+    approved = cursor.fetchone()['c']
+    cursor.execute("SELECT COUNT(*) AS c FROM opportunities WHERE build_status = 'in_progress'")
+    building = cursor.fetchone()['c']
+    cursor.execute("SELECT COUNT(*) AS c FROM opportunities WHERE build_status = 'complete' OR submission_confirmed = 1")
+    submitted = cursor.fetchone()['c']
+    cursor.execute("""
+        SELECT AVG(win_probability) AS a FROM opportunities
+        WHERE status NOT IN ('rejected','ignored','expired')
+    """)
+    avg_prob = round(cursor.fetchone()['a'] or 0, 1)
+    cursor.execute("""
+        SELECT COALESCE(SUM(prize_usd),0) AS s FROM opportunities
+        WHERE status NOT IN ('rejected','ignored','expired')
+    """)
+    total_prize = cursor.fetchone()['s']
+    cursor.execute("""
+        SELECT COALESCE(SUM(expected_value),0) AS s FROM opportunities
+        WHERE status NOT IN ('rejected','ignored','expired')
+    """)
+    total_ev = cursor.fetchone()['s']
+    cursor.execute("SELECT scan_time FROM scan_log ORDER BY id DESC LIMIT 1")
+    last_scan = cursor.fetchone()
+    conn.close()
+    next_scan = None
+    if last_scan:
+        try:
+            t = datetime.fromisoformat(last_scan['scan_time'])
+            next_scan = (t + timedelta(hours=int(os.environ.get('SCAN_INTERVAL_HOURS', 4)))).isoformat()
+        except Exception:
+            pass
+    return jsonify({
+        'total_active': total_active,
+        'high_priority': high_priority,
+        'approved': approved,
+        'building': building,
+        'submitted': submitted,
+        'avg_win_probability': avg_prob,
+        'total_prize_pool': total_prize,
+        'expected_value_total': total_ev,
+        'last_scan_time': last_scan['scan_time'] if last_scan else None,
+        'next_scan_time': next_scan
+    })
+
+
+@app.route('/api/analytics', methods=['GET'])
+def analytics():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT strftime('%Y-%W', created_at) AS week, COUNT(*) AS n, AVG(opportunity_score) AS avg_score
+        FROM opportunities
+        GROUP BY week
+        ORDER BY week DESC
+        LIMIT 12
+    """)
+    by_week = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("""
+        SELECT source, COUNT(*) AS n, COALESCE(SUM(prize_usd),0) AS pool
+        FROM opportunities
+        WHERE source IS NOT NULL AND source != ''
+        GROUP BY source
+        ORDER BY n DESC
+    """)
+    by_source = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("""
+        SELECT opportunity_score, win_probability, prize_usd, name
+        FROM opportunities
+        WHERE status NOT IN ('rejected','ignored','expired')
+    """)
+    scatter = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify({
+        'by_week': by_week,
+        'by_source': by_source,
+        'scatter': scatter
+    })
+
+
+# =============================================================================
+# Project files
+# =============================================================================
+
+@app.route('/api/projects/<int:opp_id>/files', methods=['GET'])
+def project_files(opp_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, filename, file_type, created_at FROM project_files
+        WHERE opportunity_id = ?
+        ORDER BY created_at
+    """, (opp_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify([row_to_dict(r) for r in rows])
+
+
+@app.route('/api/projects/<int:opp_id>/file/<filename>', methods=['GET'])
+def project_file(opp_id, filename):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT content FROM project_files
+        WHERE opportunity_id = ? AND filename = ?
+    """, (opp_id, filename))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    return row['content'], 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
+@app.route('/api/projects/<int:opp_id>/generate', methods=['POST'])
+def project_generate(opp_id):
+    gen = ProjectFileGenerator()
+    count = gen.generate_all(opp_id)
+    return jsonify({'success': True, 'files_generated': count})
+
+
+# =============================================================================
+# Build status
+# =============================================================================
+
+@app.route('/api/build/status', methods=['GET'])
+def build_status():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, name, build_status, github_repo_url, updated_at
+        FROM opportunities
+        WHERE build_status != 'none'
+        ORDER BY updated_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify([row_to_dict(r) for r in rows])
+
+
+@app.route('/api/build/<int:opp_id>/log', methods=['GET'])
+def build_log(opp_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT step, status, output, timestamp FROM build_log
+        WHERE opportunity_id = ?
+        ORDER BY id ASC
+    """, (opp_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify([row_to_dict(r) for r in rows])
+
+
+# =============================================================================
+# Notifications
+# =============================================================================
+
+@app.route('/api/notifications/recent', methods=['GET'])
+def recent_notifications():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, opportunity_id, type, message, sent_at, delivered
+        FROM notifications
+        ORDER BY id DESC LIMIT 20
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify([row_to_dict(r) for r in rows])
+
+
+@app.route('/api/digest', methods=['POST'])
+def send_digest():
+    ok = daily_digest()
+    return jsonify({'success': ok})
+
+
+# =============================================================================
+# Settings (read-only stub for now)
+# =============================================================================
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    return jsonify({
+        'scan_interval_hours': int(os.environ.get('SCAN_INTERVAL_HOURS', 4)),
+        'min_prize_usd': int(os.environ.get('MIN_PRIZE_USD', 500)),
+        'min_score_for_alert': int(os.environ.get('MIN_SCORE_FOR_ALERT', 70)),
+        'telegram_enabled': bool(os.environ.get('TELEGRAM_BOT_TOKEN')),
+        'discord_enabled': bool(os.environ.get('DISCORD_WEBHOOK_URL')),
+        'ntfy_enabled': bool(os.environ.get('NTFY_TOPIC')),
+        'github_enabled': bool(os.environ.get('GITHUB_TOKEN'))
+    })
+
+
+# =============================================================================
+# Error handlers
 # =============================================================================
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({'error': 'Not found'}), 404
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'not found'}), 404
+    return render_template('index.html', app_name=APP_NAME, version=VERSION, tagline=APP_TAGLINE), 200
 
 
 @app.errorhandler(500)
 def internal_error(e):
-    return jsonify({'error': 'Internal server error'}), 500
+    return jsonify({'error': 'internal server error'}), 500
 
 
 # =============================================================================
-# MAIN
+# Gunicorn hook — start scheduler in each worker
+# =============================================================================
+
+def _start_scheduler():
+    try:
+        from scheduler import SchedulerManager
+        SchedulerManager.start()
+    except Exception as e:
+        print(f"⚠️  scheduler start failed: {e}")
+
+
+_start_scheduler()
+
+
+# =============================================================================
+# Dev server
 # =============================================================================
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎯 Challenge Hunter AI - Backend Server")
+    print(f"🎯 {APP_NAME} v{VERSION}")
     print("=" * 60)
     print(f"📊 Database: {DB_PATH}")
     print(f"🌐 Port: {PORT}")
     print(f"🔧 Debug: {DEBUG}")
-    print()
-
-    # Start scanner scheduler (runs every 6 hours)
-    try:
-        scanner = ScannerEngine(DB_PATH)
-        scanner.start_scheduler()
-        print("📅 Scanner scheduler started (runs every 6 hours)")
-    except Exception as e:
-        print(f"⚠️  Scanner scheduler failed to start: {e}")
-
-    # Start Flask server
-    print()
-    print("🚀 Server running at http://localhost:5000")
-    print("📱 Telegram bot polling (if configured)")
-    print()
-    print("Press Ctrl+C to stop")
-    print()
-
-    app.run(
-        host='0.0.0.0',
-        port=PORT,
-        debug=DEBUG,
-        use_reloader=False  # Prevent double scheduler in debug mode
-    )
+    app.run(host=HOST, port=PORT, debug=DEBUG, use_reloader=False)

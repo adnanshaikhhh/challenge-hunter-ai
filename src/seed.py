@@ -1,289 +1,270 @@
 #!/usr/bin/env python3
 """
-Challenge Hunter AI - Database Seeder
-Inserts initial seed data into opportunities.db
-Run this once after schema.sql to populate with starter opportunities.
+Challenge Hunter AI v2.0 — Database Seeder
+Inserts initial seed data and computes deterministic scores / probabilities.
 """
 
-import sqlite3
+import json
 import os
+import sqlite3
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'opportunities.db')
+DB_PATH = os.environ.get(
+    'DB_PATH',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'opportunities.db')
+)
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'schema.sql')
 
+# ----------------------------------------------------------------------------
+# Scoring helpers (deterministic, no I/O)
+# ----------------------------------------------------------------------------
 
-def calculate_score(prize_usd, deadline_days, ai_policy, eligibility, difficulty, source):
-    """Calculate opportunity score using Section 3 formula"""
-    score = 50  # Start at 50
+def calculate_score(prize, days, ai_policy, difficulty, eligibility, team_size):
+    score = 50
+    if prize > 50000:    score += 25
+    elif prize > 10000:  score += 20
+    elif prize > 5000:   score += 15
+    elif prize > 2000:   score += 10
+    elif prize > 500:    score += 5
 
-    # Prize-based scoring
-    if prize_usd > 10000:
-        score += 15
-    elif prize_usd >= 5000:
-        score += 10
-    elif prize_usd >= 1000:
-        score += 5
+    if 14 <= days <= 45:     score += 12
+    elif 7 <= days < 14:     score += 6
+    elif days > 45:          score += 4
+    elif 0 < days < 7:       score -= 5
 
-    # Deadline-based scoring
-    if deadline_days and 14 <= deadline_days <= 45:
-        score += 10
-    elif deadline_days and 7 <= deadline_days < 14:
-        score += 5
+    if ai_policy == 'allowed':       score += 20
+    elif ai_policy == 'unclear':     score -= 15
+    elif ai_policy == 'restricted':  score -= 20
+    elif ai_policy == 'banned':      score -= 40
 
-    # AI policy scoring
-    if ai_policy == 'allowed':
-        score += 15
-    elif ai_policy == 'unclear':
-        score -= 15
+    if eligibility and 'global' in eligibility.lower(): score += 5
+    if team_size and 'solo' in team_size.lower():       score += 8
 
-    # Eligibility scoring
-    if eligibility:
-        if 'solo' in eligibility.lower():
-            score += 5
-        if 'global' in eligibility.lower():
-            score += 5
-        if 'team only' in eligibility.lower() or 'team only' in eligibility.lower():
-            score -= 10
+    if difficulty == 'easy':     score += 5
+    elif difficulty == 'hard':   score -= 5
 
-    # Difficulty scoring
-    if difficulty == 'easy':
-        score += 5
-    elif difficulty == 'hard':
-        score -= 5
-
-    # Large corporate sponsor penalty
-    corporate_sponsors = ['google', 'microsoft', 'amazon', 'meta', 'apple', 'nvidia']
-    if source:
-        source_lower = source.lower()
-        if any(sp in source_lower for sp in corporate_sponsors):
-            score -= 10
-
-    # Cap between 0 and 100
     return max(0, min(100, score))
 
 
-def calculate_win_probability(prize_usd, days_remaining, ai_policy, difficulty, eligibility, source):
-    """Calculate win probability using Section 3 formula"""
-    prob = 30  # Start at 30
-
-    # Prize-based
-    if prize_usd > 5000:
-        prob += 10
-
-    # Days remaining
-    if days_remaining and days_remaining > 14:
-        prob += 10
-
-    # AI policy
-    if ai_policy == 'allowed':
-        prob += 15
-
-    # Large corporate sponsor penalty
-    corporate_sponsors = ['google', 'microsoft', 'amazon', 'meta', 'apple', 'nvidia']
-    if source:
-        source_lower = source.lower()
-        if any(sp in source_lower for sp in corporate_sponsors):
-            prob -= 20
-
-    # Difficulty
-    if difficulty == 'easy':
-        prob += 10
-    elif difficulty == 'hard':
-        prob -= 10
-
-    # Team-only penalty
-    if eligibility and 'solo' not in eligibility.lower():
-        prob -= 10
-
-    # Cap between 0 and 100
-    return max(0, min(100, prob))
+def calculate_win_probability(prize, days, ai_policy, difficulty):
+    prob = 30
+    if prize > 5000:     prob += 10
+    if days > 14:        prob += 10
+    if ai_policy == 'allowed': prob += 20
+    if difficulty == 'easy':   prob += 15
+    elif difficulty == 'hard': prob -= 15
+    if prize > 50000:    prob -= 10
+    return max(5, min(95, prob))
 
 
-def generate_analysis_json(name, prize_usd, ai_policy, difficulty, source, deadline_days):
-    """Generate the AI analysis JSON template for Section 6"""
-    project_name = name.replace(' ', '-').lower()[:30]
-    build_days = 5 if difficulty == 'easy' else (10 if difficulty == 'hard' else 7)
+def calculate_expected_value(prize, win_prob):
+    return round(prize * (win_prob / 100.0), 2)
 
-    tech_stacks = {
-        'easy': ['Python', 'Flask', 'React', 'SQLite'],
-        'medium': ['Python', 'FastAPI', 'React', 'PostgreSQL', 'Docker'],
-        'hard': ['Python', 'FastAPI', 'React', 'PostgreSQL', 'Docker', 'Kubernetes', 'Redis']
-    }
 
-    summary_map = {
-        'easy': f'A beginner-friendly opportunity with a {prize_usd} prize. Perfect for getting started with competitive development.',
-        'medium': f'A competitive opportunity with {prize_usd} at stake. Requires solid planning and execution.',
-        'hard': f'A challenging high-stakes competition with {prize_usd} prize. Demands serious commitment and technical depth.'
-    }
+# ----------------------------------------------------------------------------
+# AI analysis template (deterministic, no network call)
+# ----------------------------------------------------------------------------
 
+def generate_analysis(name, prize, ai_policy, difficulty, source, days):
+    project_name = name.split()[0].lower() + '-companion'
     return {
-        "summary": summary_map.get(difficulty, summary_map['medium']),
+        "summary": f"{name} offers ${prize:,} for solo developers using AI tools. The deadline is {days} days away, leaving enough runway to ship a polished demo.",
+        "why_this_is_good": f"AI policy is {ai_policy}, the prize-to-effort ratio is strong, and {source} attracts well-funded, high-signal judges.",
         "requirements": [
-            f"Build a functional demo or prototype",
-            f"Submit before {deadline_days} days deadline" if deadline_days else "Submit before deadline",
-            "Prepare 2-3 minute video demo",
-            "Write clear README and documentation",
-            "Create compelling slide deck or landing page"
+            "Build a working demo and submit a 2-3 minute walkthrough video.",
+            "Document setup, architecture, and future roadmap in the README.",
+            "Publish code publicly (GitHub) and deploy a live demo URL."
         ],
         "risks": [
-            "High competition from experienced developers",
-            "Deadline pressure may affect code quality",
-            "Judging criteria may be subjective",
-            "Technical issues during live demo"
+            "Tight deadline — mitigate by shipping a vertical slice first.",
+            "Judge subjectivity — mitigate by emphasising metrics and visuals."
         ],
-        "win_probability_reasoning": f"Based on {difficulty} difficulty, {prize_usd} prize, and {ai_policy} AI policy, this opportunity offers a competitive chance at winning.",
+        "win_probability_reasoning": f"Probability of {calculate_win_probability(prize, days, ai_policy, difficulty)}% reflects the {difficulty} difficulty and ${prize:,} prize class.",
         "build_complexity": difficulty,
+        "time_to_build_estimate": f"{5 if difficulty == 'easy' else 10 if difficulty == 'hard' else 7} days working solo with AI tools.",
         "recommended_project": {
             "name": project_name,
-            "concept": f"An AI-powered solution that addresses a real problem in {source or 'the target domain'}",
-            "tech_stack": tech_stacks.get(difficulty, tech_stacks['medium']),
+            "tagline": "AI-powered productivity companion built in a weekend.",
+            "concept": "A pragmatic tool that solves a real workflow gap with a delightful interface, leveraging LLMs as the engine.",
+            "problem_solved": "Slow, manual workflows that burn time and break flow.",
+            "tech_stack": {
+                "frontend": ["React", "TailwindCSS"],
+                "backend": ["Python", "FastAPI"],
+                "database": ["SQLite"],
+                "ai": ["OpenAI API", "LangChain"],
+                "deployment": ["Railway", "Vercel"]
+            },
             "key_features": [
-                "Clean, professional UI/UX",
-                "Functional core feature working end-to-end",
-                "Clear documentation and setup guide",
-                "Short demo video showcasing key functionality"
+                "One-tap core flow — judges will demo this within 5 seconds.",
+                "Persistent memory — surprising recall across sessions.",
+                "Beautiful shareable output — wins screenshots and word-of-mouth."
             ],
-            "demo_approach": f"Live 2-3 minute demo showing: (1) The problem being solved, (2) Key features in action, (3) Technical highlights, (4) Future roadmap",
-            "estimated_build_days": build_days
+            "demo_approach": "1) Show the empty state. 2) Run the headline action. 3) Display the saved result. 4) Show share export. 5) End on the metrics dashboard.",
+            "wow_factor": "A live, real-time visualization that reacts to user input — the screenshot judges remember.",
+            "estimated_build_days": 5 if difficulty == 'easy' else 7
         },
-        "submission_strategy": "Focus on making the demo video polished and professional. Have a working live demo ready. Prepare backup screenshots. Write compelling project description.",
-        "recommended_action": "approve"
+        "submission_strategy": "Lead with the demo video. Make the GitHub README scannable. Submit 24 hours early to avoid platform issues.",
+        "judge_appeal": f"{source} judges reward execution speed, polish, and clear metrics — design for those.",
+        "alternative_projects": [
+            {"name": "lite", "concept": "Stripped-down CLI version of the same idea.", "build_days": 2},
+            {"name": "pro", "concept": "Full SaaS with billing and team workspaces.", "build_days": 10}
+        ],
+        "recommended_action": "approve",
+        "action_reasoning": "High score, AI-friendly rules, healthy deadline — clear green light."
     }
 
 
-def seed_database():
-    """Insert seed data into the database"""
-    # Ensure database exists
-    if not os.path.exists(DB_PATH):
-        print(f"❌ Database not found at {DB_PATH}")
-        print("   Please run schema.sql first: sqlite3 opportunities.db < schema.sql")
-        return False
+# ----------------------------------------------------------------------------
+# Seed data
+# ----------------------------------------------------------------------------
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Check if already seeded
-    cursor.execute("SELECT COUNT(*) FROM opportunities")
-    count = cursor.fetchone()[0]
-    if count > 0:
-        print(f"⚠️  Database already has {count} records. Skipping seed.")
-        print("   To re-seed, delete opportunities.db and run again.")
-        conn.close()
-        return True
-
-    # Calculate dates
+def seed_records():
     today = datetime.now()
-    deadline_30 = (today + timedelta(days=30)).strftime('%Y-%m-%d')
-    deadline_21 = (today + timedelta(days=21)).strftime('%Y-%m-%d')
-    deadline_45 = (today + timedelta(days=45)).strftime('%Y-%m-%d')
-
-    # Seed records
-    seed_records = [
+    return [
         {
             'name': 'Devpost AI Innovation Challenge 2025',
             'url': 'https://devpost.com/hackathons',
             'prize_usd': 10000,
-            'deadline': deadline_30,
+            'prize_text': '$10,000 grand prize',
+            'days': 30,
             'ai_policy': 'allowed',
             'difficulty': 'medium',
             'source': 'Devpost',
+            'source_url': 'https://devpost.com/hackathons',
             'eligibility': 'Global, solo or team',
-            'rules_summary': 'Build innovative projects using AI tools. Any tech stack allowed. Submit a working demo and 2-minute video.',
+            'team_size': 'solo or team',
+            'rules_summary': 'Build an innovative project using AI tools. Any stack. Submit a working demo and 2-minute video.',
+            'tags': 'ai,devpost,hackathon,global'
         },
         {
             'name': 'Hugging Face Open Source AI Grant',
             'url': 'https://huggingface.co/grants',
             'prize_usd': 5000,
-            'deadline': deadline_21,
+            'prize_text': '$5,000 grant',
+            'days': 21,
             'ai_policy': 'allowed',
             'difficulty': 'easy',
             'source': 'HuggingFace',
+            'source_url': 'https://huggingface.co/grants',
             'eligibility': 'Global, solo',
-            'rules_summary': 'Create open source AI projects using Hugging Face tools. Must be fully open source with code public.',
+            'team_size': 'solo',
+            'rules_summary': 'Open-source AI project using Hugging Face tools. Code must be public.',
+            'tags': 'ai,grants,open-source,oss'
         },
         {
             'name': 'Solana Summer Builder Grant 2025',
             'url': 'https://solana.com/grants',
             'prize_usd': 25000,
-            'deadline': deadline_45,
+            'prize_text': '$25,000 grant (tiered up to $50K)',
+            'days': 45,
             'ai_policy': 'allowed',
             'difficulty': 'hard',
             'source': 'Solana',
+            'source_url': 'https://solana.com/grants',
             'eligibility': 'Global, solo or team',
-            'rules_summary': 'Build on Solana blockchain. Must submit working product. Multiple grant tiers available up to $50K.',
+            'team_size': 'solo or team',
+            'rules_summary': 'Build on Solana. Working product required. Multiple grant tiers.',
+            'tags': 'web3,solana,grants,blockchain'
         },
+        {
+            'name': 'Anthropic API Developer Challenge 2025',
+            'url': 'https://www.anthropic.com/news',
+            'prize_usd': 15000,
+            'prize_text': '$15,000 in API credits + cash',
+            'days': 35,
+            'ai_policy': 'allowed',
+            'difficulty': 'medium',
+            'source': 'Anthropic',
+            'source_url': 'https://www.anthropic.com/news',
+            'eligibility': 'Global, solo',
+            'team_size': 'solo',
+            'rules_summary': 'Use the Anthropic API to ship a useful, well-documented AI app.',
+            'tags': 'ai,anthropic,claude,api'
+        },
+        {
+            'name': 'Replit Bounty Sprint',
+            'url': 'https://replit.com/bounties',
+            'prize_usd': 2500,
+            'prize_text': '$2,500 bounty',
+            'days': 10,
+            'ai_policy': 'allowed',
+            'difficulty': 'easy',
+            'source': 'Replit',
+            'source_url': 'https://replit.com/bounties',
+            'eligibility': 'Global, solo',
+            'team_size': 'solo',
+            'rules_summary': 'Solve a featured Replit bounty. Code must run on Replit.',
+            'tags': 'bounty,replit,easy,quick'
+        }
     ]
 
+
+def ensure_schema(conn):
+    if not os.path.exists(SCHEMA_PATH):
+        raise FileNotFoundError(f"schema.sql not found at {SCHEMA_PATH}")
+    with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
+        conn.executescript(f.read())
+
+
+def init_db():
+    """Create database and schema if missing. Idempotent."""
+    new_db = not os.path.exists(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    if new_db:
+        ensure_schema(conn)
+    return conn, new_db
+
+
+def seed_database():
+    conn, new_db = init_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM opportunities")
+    existing = cursor.fetchone()[0]
+    if existing > 0 and not new_db:
+        print(f"⚠️  Database already has {existing} records. Skipping seed.")
+        conn.close()
+        return existing
+
+    today = datetime.now()
     inserted = 0
-    for record in seed_records:
-        # Calculate days remaining
-        deadline_dt = datetime.strptime(record['deadline'], '%Y-%m-%d')
-        days_remaining = (deadline_dt - today).days
-
-        # Calculate scores
+    for r in seed_records():
+        deadline = (today + timedelta(days=r['days'])).strftime('%Y-%m-%d')
         score = calculate_score(
-            record['prize_usd'],
-            days_remaining,
-            record['ai_policy'],
-            record['eligibility'],
-            record['difficulty'],
-            record['source']
+            r['prize_usd'], r['days'], r['ai_policy'],
+            r['difficulty'], r['eligibility'], r['team_size']
         )
-
-        win_prob = calculate_win_probability(
-            record['prize_usd'],
-            days_remaining,
-            record['ai_policy'],
-            record['difficulty'],
-            record['eligibility'],
-            record['source']
+        prob = calculate_win_probability(
+            r['prize_usd'], r['days'], r['ai_policy'], r['difficulty']
         )
-
-        # Generate analysis JSON
-        analysis = generate_analysis_json(
-            record['name'],
-            record['prize_usd'],
-            record['ai_policy'],
-            record['difficulty'],
-            record['source'],
-            days_remaining
+        ev = calculate_expected_value(r['prize_usd'], prob)
+        analysis = generate_analysis(
+            r['name'], r['prize_usd'], r['ai_policy'],
+            r['difficulty'], r['source'], r['days']
         )
-
-        import json
-        analysis_json = json.dumps(analysis)
 
         try:
             cursor.execute("""
                 INSERT INTO opportunities (
-                    name, url, prize_usd, deadline, days_remaining,
-                    rules_summary, ai_policy, eligibility, difficulty,
-                    opportunity_score, win_probability, status,
-                    analysis_json, source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    name, url, prize_usd, prize_text, deadline, days_remaining,
+                    rules_summary, ai_policy, eligibility, team_size, difficulty,
+                    opportunity_score, win_probability, expected_value,
+                    status, analysis_json, source, source_url, tags
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                record['name'],
-                record['url'],
-                record['prize_usd'],
-                record['deadline'],
-                days_remaining,
-                record.get('rules_summary', ''),
-                record['ai_policy'],
-                record['eligibility'],
-                record['difficulty'],
-                score,
-                win_prob,
-                'pending',
-                analysis_json,
-                record['source']
+                r['name'], r['url'], r['prize_usd'], r['prize_text'],
+                deadline, r['days'],
+                r['rules_summary'], r['ai_policy'], r['eligibility'],
+                r['team_size'], r['difficulty'],
+                score, prob, ev,
+                'pending', json.dumps(analysis),
+                r['source'], r['source_url'], r['tags']
             ))
             inserted += 1
-            print(f"  ✅ Inserted: {record['name']}")
-        except sqlite3.IntegrityError as e:
-            print(f"  ⚠️  Skipped (already exists): {record['name']}")
+            print(f"  ✅ {r['name']} (score {score}, ev ${ev:,.0f})")
+        except sqlite3.IntegrityError:
+            print(f"  ⚠️  Skipped (duplicate): {r['name']}")
 
-    conn.commit()
-
-    # Log the seed action
     cursor.execute("""
         INSERT INTO scan_log (scan_time, sources_scanned, new_found, errors)
         VALUES (?, ?, ?, ?)
@@ -291,25 +272,13 @@ def seed_database():
 
     conn.commit()
     conn.close()
-
-    print(f"\n🎉 Seeding complete! Inserted {inserted} opportunities.")
-    print(f"📊 Total records in database: {count + inserted}")
-    return True
+    print(f"\n🎉 Seeded {inserted} opportunities.")
+    return inserted
 
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎯 Challenge Hunter AI - Database Seeder")
+    print("🎯 Challenge Hunter AI v2.0 — Seeder")
     print("=" * 60)
-    print()
-
-    success = seed_database()
-
-    if success:
-        print()
-        print("🚀 Ready to run the app: python app.py")
-        print("🌐 Then open: http://localhost:5000")
-    else:
-        print()
-        print("❌ Seeding failed. Please check the error above.")
-        exit(1)
+    n = seed_database()
+    print(f"\n📊 Total in DB: {n}")

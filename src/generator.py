@@ -1,1003 +1,495 @@
 #!/usr/bin/env python3
 """
-Challenge Hunter AI - Project File Generator
-Generates 5 project files for approved opportunities:
-1. README.md - Project overview and setup
-2. architecture.md - System design and tech stack
-3. task_list.md - Day-by-day development plan
-4. demo_plan.md - Demo script and talking points
-5. submission_checklist.md - Final submission checklist
+Challenge Hunter AI v2.0 — Project File Generator
+Generates full project artefacts (README, plan, code skeletons) for an approved opportunity.
 """
 
+from __future__ import annotations
+
+import json
 import os
 import sqlite3
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any, Dict, List
 
-# =============================================================================
-# DATABASE
-# =============================================================================
-
-DB_PATH = os.environ.get('DB_PATH', os.path.join(os.path.dirname(__file__), 'opportunities.db'))
+from config import DB_PATH, PROJECTS_DIR
 
 
-def get_db_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH)
-    return conn
+# ----------------------------------------------------------------------------
+# Database helpers
+# ----------------------------------------------------------------------------
+
+def _conn():
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+    return c
 
 
-# =============================================================================
-# FILE GENERATORS
-# =============================================================================
+def _record_files(opportunity_id: int, files: Dict[str, str], file_type: str = 'doc') -> int:
+    """Persist generated files into project_files table."""
+    conn = _conn()
+    cursor = conn.cursor()
+    inserted = 0
+    for filename, content in files.items():
+        cursor.execute("""
+            INSERT INTO project_files (opportunity_id, filename, content, file_type, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (opportunity_id, filename, content, file_type, datetime.now().isoformat()))
+        inserted += 1
+    conn.commit()
+    conn.close()
+    return inserted
 
-def generate_readme(opp, analysis):
-    """Generate README.md content"""
-    name = opp.get('name', 'Project')
-    prize = opp.get('prize_usd', 0)
-    deadline = opp.get('deadline', 'TBD')
-    source = opp.get('source', 'Unknown')
-    eligibility = opp.get('eligibility', 'Global')
-    difficulty = opp.get('difficulty', 'medium')
-    ai_policy = opp.get('ai_policy', 'allowed')
 
-    project = analysis.get('recommended_project', {})
-    project_name = project.get('name', 'my-project')
-    concept = project.get('concept', 'An innovative AI-powered solution')
-    tech_stack = project.get('tech_stack', ['Python', 'Flask', 'React'])
-    key_features = project.get('key_features', [])
-    estimated_days = project.get('estimated_build_days', 5)
+# ----------------------------------------------------------------------------
+# File builders
+# ----------------------------------------------------------------------------
 
-    tech_stack_str = ', '.join(tech_stack)
+def _readme(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    rp = analysis.get('recommended_project', {})
+    return f"""# {rp.get('name', opp.get('name', 'Project'))}
 
-    content = f"""# {project_name}
+> {rp.get('tagline', 'AI-powered project built for the win.')}
 
-> {concept}
+Built for: **{opp.get('name')}** — ${opp.get('prize_usd', 0):,} in prizes.
 
-## 🏆 Challenge
-{name} | ${prize:,} Prize | Deadline: {deadline}
+## Problem
 
-## 🎯 Problem It Solves
-[Describe the core problem your project addresses in 2-3 sentences]
+{rp.get('problem_solved', 'A real workflow gap that slows people down.')}
 
-## ✨ Key Features
+## Concept
 
-{chr(10).join(f"- {feat}" for feat in key_features)}
+{rp.get('concept', 'A pragmatic AI-native tool.')}
 
-- Clean, responsive UI with modern design
-- Real-time functionality with no lag
-- Production-ready with proper error handling
-- Comprehensive documentation
+## Tech Stack
 
-## 🛠 Tech Stack
+- **Frontend:** {', '.join(rp.get('tech_stack', {}).get('frontend', []))}
+- **Backend:** {', '.join(rp.get('tech_stack', {}).get('backend', []))}
+- **Database:** {', '.join(rp.get('tech_stack', {}).get('database', []))}
+- **AI:** {', '.join(rp.get('tech_stack', {}).get('ai', []))}
+- **Deployment:** {', '.join(rp.get('tech_stack', {}).get('deployment', []))}
 
-{tech_stack_str}
+## Key Features
 
-## 📋 Requirements
+{chr(10).join(f'- {f}' for f in rp.get('key_features', []))}
 
-- Python 3.11+
-- Node.js 18+
-- npm or yarn
-- Modern web browser
+## Demo Approach
 
-## 🚀 Quick Start
+{rp.get('demo_approach', 'Show the core action in under 60 seconds.')}
 
-### 1. Clone the Repository
+## Wow Factor
 
-```bash
-git clone https://github.com/your-username/{project_name}.git
-cd {project_name}
-```
+{rp.get('wow_factor', 'Real-time feedback the user can see immediately.')}
 
-### 2. Install Backend Dependencies
+## Build Timeline
+
+Estimated {rp.get('estimated_build_days', 7)} days working solo with AI tools.
+
+## Setup
 
 ```bash
+git clone <this-repo>
+cd <project>
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env  # add secrets
+python src/main.py
 ```
 
-### 3. Install Frontend Dependencies
+## License
 
-```bash
-cd client
-npm install
-```
-
-### 4. Set Up Environment
-
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-### 5. Run the Application
-
-```bash
-# Terminal 1 - Backend
-python app.py
-
-# Terminal 2 - Frontend
-cd client
-npm run dev
-```
-
-### 6. Open in Browser
-
-Navigate to: http://localhost:3000
-
-## 📁 Project Structure
-
-```
-{project_name}/
-├── client/              # Frontend (React)
-│   ├── src/
-│   │   ├── components/  # React components
-│   │   ├── pages/       # Page components
-│   │   ├── hooks/       # Custom hooks
-│   │   └── utils/       # Utility functions
-│   └── package.json
-├── server/              # Backend (Python)
-│   ├── app.py          # Main application
-│   ├── routes/         # API routes
-│   └── models/         # Data models
-├── requirements.txt    # Python dependencies
-├── README.md           # This file
-└── architecture.md     # System architecture
-```
-
-## 🎬 Demo
-
-Watch our demo video: [Link to demo video]
-
-### Demo Highlights
-
-1. **Problem Statement** - What challenge does this solve?
-2. **Live Demo** - Watch the app in action
-3. **Technical Deep Dive** - How it was built
-4. **Future Roadmap** - What's next?
-
-## 🧪 Testing
-
-```bash
-# Run backend tests
-pytest server/tests/
-
-# Run frontend tests
-cd client && npm test
-```
-
-## 📝 Submission Details
-
-- **Challenge:** {name}
-- **Prize:** ${prize:,}
-- **Deadline:** {deadline}
-- **Source:** {source}
-- **Difficulty:** {difficulty.capitalize()}
-- **AI Policy:** {ai_policy.capitalize()}
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-MIT License - feel free to use this project for your submission.
-
-## 🙏 Acknowledgments
-
-- Challenge Hunter AI for opportunity discovery
-- The {source} team for organizing this competition
-- Open source contributors and the developer community
-
----
-
-**Built with ❤️ for {name}**
-**Estimated build time: {estimated_days} days**
+MIT
 """
 
-    return content
 
+def _architecture(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    rp = analysis.get('recommended_project', {})
+    return f"""# Architecture — {rp.get('name', opp.get('name'))}
 
-def generate_architecture(opp, analysis):
-    """Generate architecture.md content"""
-    name = opp.get('name', 'Project')
-    prize = opp.get('prize_usd', 0)
-    difficulty = opp.get('difficulty', 'medium')
+## High-level flow
 
-    project = analysis.get('recommended_project', {})
-    project_name = project.get('name', 'my-project')
-    concept = project.get('concept', 'An innovative AI-powered solution')
-    tech_stack = project.get('tech_stack', ['Python', 'Flask', 'React'])
+1. User lands on the home page.
+2. They trigger the headline action.
+3. The backend calls the LLM with a tight, optimised prompt.
+4. Result is stored in the database and rendered to the user.
+5. User can share, export, or trigger follow-up actions.
 
-    # Separate frontend and backend tech
-    backend_tech = [t for t in tech_stack if t.lower() in ['python', 'fastapi', 'flask', 'django', 'node.js', 'express', 'postgresql', 'mysql', 'mongodb', 'redis', 'docker', 'kubernetes', 'celery']]
-    frontend_tech = [t for t in tech_stack if t.lower() in ['react', 'vue', 'angular', 'svelte', 'next.js', 'nuxt', 'tailwind css', 'html', 'css', 'javascript', 'typescript']]
+## Components
 
-    if not backend_tech:
-        backend_tech = ['Python', 'FastAPI']
-    if not frontend_tech:
-        frontend_tech = ['React', 'Tailwind CSS']
+- **Frontend** — single-page React app with TailwindCSS, served by Vercel.
+- **API** — FastAPI service in Python, deployed on Railway.
+- **DB** — PostgreSQL (prod) / SQLite (dev) for persistence.
+- **Worker** — APScheduler-driven background jobs for periodic tasks.
+- **LLM layer** — OpenAI API abstracted behind a small wrapper.
 
-    content = f"""# {project_name} - Architecture
+## Trade-offs
 
-## 📖 Overview
+- We optimise for shippability over scale. Postgres swap is a 1-day change.
+- We use polling instead of websockets to keep infra simple.
+- All secrets live in env vars; no keys in the repo.
 
-{concept}
+## Security
 
-This is a full-stack application built for **{name}** ({prize:,} prize pool).
-
-## 🏗 System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                          │
-│                   (React + Tailwind CSS)                     │
-│                                                              │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │  Components │  │    Pages     │  │   State (Zustand)│  │
-│  └─────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP/REST
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        API GATEWAY                            │
-│                   (FastAPI + CORS)                           │
-│                                                              │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   Routes    │  │  Middleware  │  │  Auth (JWT)      │  │
-│  └─────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-              ▼               ▼               ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   DATA LAYER    │ │   AI SERVICES   │ │   EXTERNAL      │
-│  (PostgreSQL)   │ │  (OpenAI/Claude)│ │   APIs          │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-```
-
-## 🛠 Tech Stack Justification
-
-### Backend: {', '.join(backend_tech)}
-
-| Technology | Justification |
-|------------|---------------|
-| **Python** | Excellent AI/ML ecosystem, rapid development |
-| **FastAPI** | High performance, automatic docs, type safety |
-| **PostgreSQL** | Reliable relational data, JSON support |
-| **Docker** | Consistent deployment, easy scaling |
-
-### Frontend: {', '.join(frontend_tech)}
-
-| Technology | Justification |
-|------------|---------------|
-| **React** | Component reuse, vast ecosystem, great DX |
-| **Tailwind CSS** | Rapid styling, consistent design system |
-| **Vite** | Fast builds, instant server start |
-
-## 📊 Data Flow
-
-### User Request Flow
-
-```
-User Action → React Component → API Request → FastAPI Route → Database → Response → UI Update
-```
-
-### Key Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| GET | `/api/data` | Fetch main data |
-| POST | `/api/analyze` | AI-powered analysis |
-| PUT | `/api/update` | Update record |
-
-## 🔐 Security
-
-- JWT-based authentication for all protected routes
-- CORS configured for specific origins only
-- Input validation on all endpoints
-- SQL injection prevention via parameterized queries
-- XSS prevention via React's built-in escaping
-
-## 📈 Performance Optimizations
-
-1. **Database Indexing** - Fast queries on common lookups
-2. **Caching** - Redis for frequently accessed data
-3. **Lazy Loading** - Load components on demand
-4. **Code Splitting** - Smaller JavaScript bundles
-
-## 🚢 Deployment
-
-### Docker
-
-```bash
-# Build image
-docker build -t {project_name}:latest .
-
-# Run container
-docker run -p 8000:8000 {project_name}:latest
-```
-
-### Production Environment
-
-- **Frontend**: Vercel / Netlify
-- **Backend**: Railway / Render / Fly.io
-- **Database**: Railway Postgres / Supabase
-- **Monitoring**: Sentry + DataDog
-
-## 🔮 Future Roadmap
-
-1. **Phase 1** - Core features, MVP launch
-2. **Phase 2** - User authentication, profiles
-3. **Phase 3** - AI-powered recommendations
-4. **Phase 4** - Mobile app (React Native)
-
-## 📐 Diagrams
-
-### Component Hierarchy
-
-```
-App
-├── Layout
-│   ├── Header
-│   ├── Sidebar
-│   └── Footer
-├── Pages
-│   ├── Dashboard
-│   ├── Analysis
-│   └── Settings
-└── Components
-    ├── Cards
-    ├── Forms
-    └── Modals
-```
-
----
-
-**Last Updated:** {datetime.now().strftime('%Y-%m-%d')}
+- Auth via short-lived JWTs.
+- Rate limit the public API.
+- Sanitise every user input.
+- No PII is logged.
 """
 
-    return content
 
+def _task_list(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    rp = analysis.get('recommended_project', {})
+    days = rp.get('estimated_build_days', 7)
+    return f"""# Task list — {rp.get('name', opp.get('name'))}
 
-def generate_task_list(opp, analysis):
-    """Generate task_list.md content"""
-    name = opp.get('name', 'Project')
-    deadline = opp.get('deadline', 'TBD')
-    difficulty = opp.get('difficulty', 'medium')
+## Day 1 — Foundations
+- [ ] Project scaffold (frontend + backend)
+- [ ] Database schema + migrations
+- [ ] Auth scaffolding
 
-    project = analysis.get('recommended_project', {})
-    estimated_days = project.get('estimated_build_days', 5)
+## Day 2 — Core flow
+- [ ] LLM wrapper with retries
+- [ ] Core API endpoint
+- [ ] Frontend happy path
 
-    # Adjust tasks based on difficulty
-    task_multipliers = {'easy': 0.8, 'medium': 1.0, 'hard': 1.3}
-    multiplier = task_multipliers.get(difficulty, 1.0)
-    days = max(3, int(estimated_days * multiplier))
+## Day 3 — Polish
+- [ ] Loading states + error UI
+- [ ] Share/export
+- [ ] Mobile responsive pass
 
-    content = f"""# {name} - Development Task List
+## Day 4 — Demo + submit
+- [ ] Deploy frontend + backend
+- [ ] Record 2-minute demo video
+- [ ] Write README + screenshots
+- [ ] Submit on the platform
 
-**Total Estimated Days:** {days}
-**Deadline:** {deadline}
-**Difficulty:** {difficulty.capitalize()}
-
----
-
-## 📅 Day 1: Setup & Foundation
-
-### Morning (3 hours)
-- [ ] Set up project repository (Git initialized)
-- [ ] Configure development environment
-- [ ] Install all dependencies (backend + frontend)
-- [ ] Set up database and schema
-- [ ] Create .env files with config
-
-### Afternoon (4 hours)
-- [ ] Build basic backend structure (routes, models)
-- [ ] Set up frontend project structure
-- [ ] Create base layout component
-- [ ] Implement basic routing
-- [ ] Verify both servers run without errors
-
-### Evening (2 hours)
-- [ ] Review Day 1 work
-- [ ] Write basic README setup section
-- [ ] Push initial commit
-
----
-
-## 📅 Day 2: Core Features
-
-### Morning (3 hours)
-- [ ] Design database schema for core data
-- [ ] Build main API endpoints (CRUD)
-- [ ] Connect frontend to backend
-- [ ] Build main page layouts
-
-### Afternoon (4 hours)
-- [ ] Implement core feature #1
-- [ ] Implement core feature #2
-- [ ] Add form handling and validation
-- [ ] Style components with Tailwind
-
-### Evening (2 hours)
-- [ ] Test all features manually
-- [ ] Fix any bugs found
-- [ ] Push progress commit
-
----
-
-## 📅 Day 3: AI Integration & Polish
-
-### Morning (3 hours)
-- [ ] Integrate AI API (OpenAI/Claude/Anthropic)
-- [ ] Build AI-powered features
-- [ ] Handle API errors gracefully
-- [ ] Add loading states
-
-### Afternoon (4 hours)
-- [ ] Polish UI/UX - all pages styled
-- [ ] Add responsive design
-- [ ] Implement dark/light mode if time
-- [ ] Add animations and transitions
-
-### Evening (2 hours)
-- [ ] Cross-browser testing
-- [ ] Mobile responsiveness check
-- [ ] Push polished commit
-
----
-
-## 📅 Day 4: Demo Preparation
-
-### Morning (3 hours)
-- [ ] Record demo video (2-3 minutes)
-- [ ] Prepare slides or demo script
-- [ ] Practice demo presentation
-- [ ] Prepare backup screenshots
-
-### Afternoon (4 hours)
-- [ ] Final feature polish
-- [ ] Documentation pass
-- [ ] Write comprehensive README
-- [ ] Add architecture diagram
-
-### Evening (2 hours)
-- [ ] Submit initial draft if allowed
-- [ ] Review submission requirements
-- [ ] Final code cleanup
-
----
-
-## 📅 Day 5: Testing & Submission
-
-### Morning (3 hours)
-- [ ] Full regression testing
-- [ ] Test on multiple browsers
-- [ ] Test edge cases
-- [ ] Fix any remaining bugs
-
-### Afternoon (4 hours)
-- [ ] Prepare submission materials:
-  - [ ] Project description
-  - [ ] Demo video link
-  - [ ] Screenshots
-  - [ ] Setup instructions
-- [ ] Deploy to production/hosting
-- [ ] Test live deployment
-
-### Evening (2 hours)
-- [ ] Final review of submission
-- [ ] Submit before deadline
-- [ ] Celebrate! 🎉
-
----
-
-## 🎯 Daily Checklist
-
-Before ending each day:
-- [ ] All code committed to git
-- [ ] No console errors in browser
-- [ ] README updated if needed
-- [ ] Ready to demo today's work
-
-## 🚨 Risk Mitigation
-
-| Risk | Mitigation |
-|------|------------|
-| AI API rate limits | Cache responses, add fallback |
-| Deadline pressure | Skip "nice to have" features |
-| Demo fails | Have screenshots as backup |
-| Mobile issues | Test early, focus on desktop |
-
----
-
-## ✅ Submission Requirements Checklist
-
-- [ ] Working demo deployed
-- [ ] Demo video (2-3 minutes)
-- [ ] README complete
-- [ ] Screenshots ready
-- [ ] Source code submitted
-- [ ] Project description written
-
-**Good luck! 🚀**
+## Stretch
+- [ ] Analytics dashboard
+- [ ] Email notifications
+- [ ] User accounts
 """
 
-    return content
 
+def _demo_plan(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    rp = analysis.get('recommended_project', {})
+    return f"""# Demo plan — {rp.get('name', opp.get('name'))}
 
-def generate_demo_plan(opp, analysis):
-    """Generate demo_plan.md content"""
-    name = opp.get('name', 'Project')
-    prize = opp.get('prize_usd', 0)
-    source = opp.get('source', 'Unknown')
+## 0:00 — Cold open
+Open with the empty state and the problem you solve.
 
-    project = analysis.get('recommended_project', {})
-    project_name = project.get('name', 'my-project')
-    key_features = project.get('key_features', [])
-    demo_approach = project.get('demo_approach', 'Minute-by-minute demo script')
+## 0:15 — Core action
+Run the headline flow live. No edits. No mocks.
 
-    content = f"""# {name} - Demo Plan
+## 0:45 — Show the result
+Reveal the output and highlight the wow factor.
 
-**Project:** {project_name}
-**Prize:** ${prize:,}
-**Demo Duration:** 2-3 minutes
+## 1:15 — Code walkthrough
+1 minute on the architecture slide.
 
----
+## 1:45 — Future roadmap
+Where this goes next. Why this matters.
 
-## 🎬 Demo Script (3 Minutes)
-
-### Minute 1: Introduction (60 seconds)
-
-**Slide: Title + Problem Statement**
-
-> "Hi everyone, I'm here to present [Project Name] - [One sentence concept]."
-
-**Key Points to Cover:**
-1. Introduce yourself briefly (5 seconds)
-2. State the problem you're solving (20 seconds)
-   - "The challenge today is..."
-   - "Current solutions are lacking because..."
-3. Present your solution (20 seconds)
-   - "We built [Name] to solve this"
-   - "Our key insight was..."
-
-**Transition:** "Let me show you how it works..."
-
----
-
-### Minute 2: Live Demo (60 seconds)
-
-**Open the application live**
-
-**Demo Flow:**
-1. Show the main dashboard (10 seconds)
-   - Point out key metrics or features
-2. Demonstrate primary feature #1 (15 seconds)
-   - Show it working with real data
-   - Highlight what makes it special
-3. Demonstrate primary feature #2 (15 seconds)
-   - Different from #1, show breadth
-4. Show AI-powered feature (15 seconds)
-   - This is the differentiator
-   - Show real AI output
-
-**Demo Do's:**
-- ✅ Use realistic data/examples
-- ✅ Show clear before/after
-- ✅ Pause for effect on key moments
-- ✅ Make it look effortless
-
-**Demo Don'ts:**
-- ❌ Don't rush - take your time
-- ❌ Don't show error states
-- ❌ Don't fumble with mouse
-- ❌ Don't go too deep technically
-
-**If Demo Fails:**
-> "Here's a screenshot of the feature working..." (switch to screenshots backup)
-
----
-
-### Minute 3: Technical Highlights + Wrap-up (60 seconds)
-
-**Technical Points to Mention:**
-1. Tech stack used (10 seconds)
-   - "Built with {', '.join(project.get('tech_stack', ['Python', 'FastAPI', 'React']))}"
-2. Key technical achievement (15 seconds)
-   - Something impressive about implementation
-3. Future roadmap (10 seconds)
-   - "Next steps would be..."
-
-**Closing:**
-> "And that's [Project Name]. We built this in [X] days with a focus on [key quality]. Thank you!"
-
-**Q&A Prep:**
-- Know your architecture decisions
-- Be ready to discuss scaling
-- Know your approximate cost to run
-
----
-
-## 📊 What to Highlight
-
-### Primary Features (Must Show)
-{chr(10).join(f"{i+1}. {feat}" for i, feat in enumerate(key_features[:3]))}
-
-### Secondary Features (If Time)
-- User-friendly interface
-- Fast performance
-- Clean code architecture
-
-### Technical Highlights
-- AI integration
-- Real-time updates
-- Responsive design
-
----
-
-## 🎯 Judge Talking Points
-
-1. **Innovation** - What's novel about your approach?
-2. **Impact** - How many people does this help?
-3. **Feasibility** - Is this actually buildable?
-4. **Presentation** - Did you tell a compelling story?
-5. **Completeness** - Does it work end-to-end?
-
----
-
-## 🛡 Backup Plan
-
-### If Live Demo Fails:
-1. **Screenshots** - Have 3-4 screenshots ready
-2. **Loom Video** - Pre-recorded backup video
-3. **Local Demo** - Run locally if cloud is down
-
-### If Questions You Can't Answer:
-> "That's a great question. We focused on [what you know] and haven't explored that area yet."
-
----
-
-## 📋 Demo Checklist (Before You Start)
-
-- [ ] Deployed to production URL
-- [ ] Demo account logged in
-- [ ] Browser tested, no console errors
-- [ ] Screenshots saved locally
-- [ ] Backup video recorded
-- [ ] Timer tested (3 minutes)
-- [ ] Slides ready (if using)
-
-- [ ] Water nearby
-- [ ] Mic check done
-- [ ] Screen share tested
-- [ ] Notifications disabled
-
----
-
-## 🎥 Recording Tips
-
-1. **Resolution:** 1080p minimum
-2. **Frame Rate:** 30fps
-3. **Audio:** Use mic, not built-in
-4. **File Size:** Under 100MB for upload
-5. **Format:** MP4 (H.264)
-
----
-
-## ⏱ Time Management
-
-| Segment | Target | Max |
-|---------|--------|-----|
-| Intro | 60s | 75s |
-| Demo | 60s | 90s |
-| Close | 60s | 75s |
-| **Total** | **3 min** | **4 min** |
-
----
-
-**Practice your demo at least 3 times before the real thing! 🎯**
+## 1:55 — Close
+Project name + URL. Hold for 2 seconds. End.
 """
 
-    return content
 
+def _submission_checklist(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    return f"""# Submission checklist — {opp.get('name')}
 
-def generate_submission_checklist(opp, analysis):
-    """Generate submission_checklist.md content"""
-    name = opp.get('name', 'Project')
-    prize = opp.get('prize_usd', 0)
-    deadline = opp.get('deadline', 'TBD')
-    source = opp.get('source', 'Unknown')
-    eligibility = opp.get('eligibility', 'Global')
-
-    project = analysis.get('recommended_project', {})
-    project_name = project.get('name', 'my-project')
-    tech_stack = project.get('tech_stack', [])
-
-    content = f"""# {name} - Submission Checklist
-
-**Project:** {project_name}
-**Prize:** ${prize:,}
-**Deadline:** {deadline} (ALL TIMES IN YOUR LOCAL TIMEZONE)
-**Source:** {source}
-**Eligibility:** {eligibility}
-
----
-
-## ⚠️ CRITICAL REMINDERS
-
-1. **Submit at least 2 hours before deadline** - last-minute issues happen
-2. **Read ALL submission requirements** - disqualification is real
-3. **Verify your submission** - check links work, files are complete
-4. **Keep a copy of everything** - local backup + cloud backup
-
----
-
-## 📝 Required Materials
-
-### ✅ Project Submission Form
-
-- [ ] Project name entered correctly
-- [ ] Short description (150-280 characters)
-- [ ] Full description written compellingly
-- [ ] All required fields completed
+## Required
+- [ ] Working demo (live URL)
+- [ ] Source code (GitHub public)
+- [ ] 2-3 minute demo video
+- [ ] Project description (200-500 words)
+- [ ] Tagline (max 80 chars)
+- [ ] Cover image (1200x630)
+- [ ] Tech stack tags
 - [ ] Eligibility confirmed
 
-### ✅ Source Code
+## Nice to have
+- [ ] 3 screenshots
+- [ ] 30-second teaser
+- [ ] Twitter post draft
+- [ ] Discord announcement
 
-- [ ] Code uploaded (ZIP or GitHub repo)
-- [ ] All dependencies in requirements.txt
-- [ ] README included
-- [ ] License file included
-- [ ] No sensitive data (API keys removed)
+## Quality bar
+- [ ] No console errors
+- [ ] Mobile-friendly
+- [ ] README is scannable in 30 seconds
+- [ ] All links resolve
+- [ ] Build passes
 
-### ✅ Demo Video
-
-- [ ] Video recorded (2-3 minutes)
-- [ ] Audio clear and audible
-- [ ] Video under file size limit
-- [ ] Uploaded successfully
-- [ ] Link works publicly
-
-### ✅ Screenshots
-
-- [ ] Main dashboard screenshot
-- [ ] Feature demonstration screenshots (2-3)
-- [ ] Mobile responsiveness screenshot
-- [ ] All images properly labeled
-
-### ✅ Documentation
-
-- [ ] README.md complete
-- [ ] Setup instructions clear
-- [ ] Architecture.md included
-- [ ] License specified (MIT recommended)
-
----
-
-## 🚫 Common Mistakes to AVOID
-
-| Mistake | Prevention |
-|---------|------------|
-| Forgot to submit | Set 3 alarms + calendar reminder |
-| Wrong file format | Read requirements twice |
-| Dead link in video | Test all links 24h before |
-| Expired API key | Have backup/demo mode |
-| Submitted after deadline | Submit 2 hours early minimum |
-| Incomplete fields | Use this checklist |
-
----
-
-## 🔍 Final Review (Do This 24 Hours Before Deadline)
-
-### 24 Hours Before
-
-- [ ] All code committed and pushed
-- [ ] README updated with correct links
-- [ ] Demo video uploaded and accessible
-- [ ] Screenshots all look professional
-- [ ] Project description proofread
-- [ ] Eligibility requirements double-checked
-
-### 2 Hours Before Deadline
-
-- [ ] Log into submission platform
-- [ ] Start submission process
-- [ ] Upload all files
-- [ ] Fill all fields
-- [ ] Preview everything
-- [ ] Submit!
-
-### After Submitting
-
-- [ ] Confirmation email received
-- [ ] Check submission link publicly
-- [ ] Verify file sizes are within limits
-- [ ] Screenshot confirmation for records
-
----
-
-## 📦 Submission Package Contents
-
-```
-{project_name}/
-├── submission.zip
-│   ├── source-code/
-│   │   ├── (all project files)
-│   │   └── README.md
-│   ├── demo-video.mp4
-│   ├── screenshots/
-│   │   ├── dashboard.png
-│   │   ├── feature-1.png
-│   │   └── feature-2.png
-│   └── additional-materials/
-│       └── (any extra docs)
-├── live-url.txt (https://your-demo-url.com)
-├── video-url.txt (https://youtube.com/watch?v=xxx)
-└── notes.txt (anything to tell judges)
-```
-
----
-
-## 📞 Emergency Contacts
-
-| Contact | Email | Phone |
-|---------|-------|-------|
-| Challenge Organizer | [Check {source} website] | - |
-| Technical Support | [If provided] | - |
-| Your Email | [your@email.com] | - |
-
----
-
-## 📅 Timeline
-
-| Deadline Type | Date/Time |
-|--------------|-----------|
-| **Final Deadline** | {deadline} |
-| **Personal Buffer** | 2 hours before |
-| **Internal Review** | 24 hours before |
-| **Code Freeze** | 12 hours before |
-
----
-
-## ✅ Final Sign-Off
-
-Before hitting submit, check each of these:
-
-- [ ] I've read the complete rules
-- [ ] My project meets all eligibility requirements
-- [ ] I have rights to all code and assets
-- [ ] The demo video is under the time limit
-- [ ] All links are public and working
-- [ ] No API keys or secrets in code
-- [ ] I've tested the submission on a different browser
-- [ ] I have a backup of everything
-
----
-
-**You are READY. Submit with confidence! 🚀**
-
----
-
-## 🎉 Post-Submission
-
-After you submit:
-
-1. Take a break - you earned it!
-2. Share on LinkedIn/Twitter (use competition hashtag)
-3. Add to your portfolio
-4. Write a blog post about what you learned
-5. Thank anyone who helped you
-
-**Good luck! You've got this! 💪**
+## Timing
+- [ ] Submit 24 hours before deadline
+- [ ] Have backup offline copies of all media
 """
 
-    return content
+
+def _main_py(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    rp = analysis.get('recommended_project', {})
+    return f'''#!/usr/bin/env python3
+"""
+{rp.get('name', 'Main')} — entry point.
+"""
+from __future__ import annotations
+
+import os
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI(title="{rp.get('name', 'Project')}")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-# =============================================================================
-# MAIN GENERATOR CLASS
-# =============================================================================
+class Query(BaseModel):
+    text: str
+
+
+@app.get("/")
+def root():
+    return {{"name": "{rp.get('name')}", "status": "ok"}}
+
+
+@app.get("/health")
+def health():
+    return {{"status": "ok"}}
+
+
+@app.post("/api/generate")
+def generate(q: Query):
+    if not q.text.strip():
+        raise HTTPException(status_code=400, detail="Empty query")
+    # TODO: call LLM
+    return {{"result": f"Echo: {{q.text}}", "status": "ok"}}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+'''
+
+
+def _frontend_index(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    rp = analysis.get('recommended_project', {})
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{rp.get('name', 'Project')}</title>
+  <meta name="description" content="{rp.get('tagline', '')}" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>{rp.get('name', 'Project')}</h1>
+    <p class="tagline">{rp.get('tagline', '')}</p>
+    <form id="prompt">
+      <textarea id="input" rows="3" placeholder="Ask anything..."></textarea>
+      <button type="submit">Run</button>
+    </form>
+    <pre id="output"></pre>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>
+"""
+
+
+def _frontend_app_js() -> str:
+    return '''const form = document.getElementById('prompt');
+const out = document.getElementById('output');
+const input = document.getElementById('input');
+form?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  out.textContent = 'Thinking...';
+  try {
+    const r = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: input.value })
+    });
+    const data = await r.json();
+    out.textContent = data.result || 'No result';
+  } catch (err) {
+    out.textContent = 'Error: ' + err.message;
+  }
+});
+'''
+
+
+def _frontend_style_css() -> str:
+    return ''':root {
+  --bg: #0a0a0f;
+  --fg: #f8fafc;
+  --muted: #94a3b8;
+  --accent: #6366f1;
+  --card: #11111c;
+  --border: #1e1e30;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+.container { max-width: 720px; margin: 4rem auto; padding: 0 1rem; }
+h1 { font-size: 2.4rem; margin: 0 0 0.5rem; }
+.tagline { color: var(--muted); margin: 0 0 2rem; }
+textarea, button {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  font: inherit;
+}
+button {
+  margin-top: 0.8rem;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+pre {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  min-height: 4rem;
+}
+'''
+
+
+def _requirements_txt() -> str:
+    return """fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+openai>=1.10.0
+requests>=2.31.0
+"""
+
+
+def _dockerfile() -> str:
+    return """FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV PORT=8000
+EXPOSE 8000
+CMD [\"uvicorn\", \"src.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]
+"""
+
+
+def _github_actions_deploy() -> str:
+    return """name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q || true
+"""
+
+
+# ----------------------------------------------------------------------------
+# Public API
+# ----------------------------------------------------------------------------
 
 class ProjectFileGenerator:
-    """Generates project files for approved opportunities"""
+    def __init__(self, db_path: str = DB_PATH, projects_dir: str = str(PROJECTS_DIR)):
+        self.db_path = db_path
+        self.projects_dir = projects_dir
+        os.makedirs(self.projects_dir, exist_ok=True)
 
-    FILES = [
-        ('README.md', generate_readme),
-        ('architecture.md', generate_architecture),
-        ('task_list.md', generate_task_list),
-        ('demo_plan.md', generate_demo_plan),
-        ('submission_checklist.md', generate_submission_checklist),
-    ]
-
-    def __init__(self, db_path=None):
-        self.db_path = db_path or DB_PATH
-
-    def generate_all(self, opportunity_id, opportunity):
-        """Generate all 5 project files for an opportunity"""
-        # Parse analysis_json if it's a string
-        analysis = opportunity.get('analysis_json', {})
-        if isinstance(analysis, str):
-            try:
-                analysis = json.loads(analysis)
-            except json.JSONDecodeError:
-                analysis = {}
-
-        # Merge opportunity data into analysis for recommended_project
-        if 'recommended_project' not in analysis:
-            analysis['recommended_project'] = {}
-
-        conn = get_db_connection()
+    def _load_opportunity(self, opportunity_id: int) -> Dict[str, Any]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-
-        files_created = 0
-
-        for filename, generator_func in self.FILES:
-            try:
-                content = generator_func(opportunity, analysis)
-
-                # Save to database
-                cursor.execute("""
-                    INSERT INTO project_files (opportunity_id, filename, content)
-                    VALUES (?, ?, ?)
-                """, (opportunity_id, filename, content))
-                files_created += 1
-
-                print(f"  📄 Generated: {filename}")
-
-            except Exception as e:
-                print(f"  ⚠️  Failed to generate {filename}: {e}")
-                continue
-
-        conn.commit()
-        conn.close()
-
-        print(f"  ✅ Created {files_created} project files for opportunity #{opportunity_id}")
-        return files_created
-
-    def get_files_for_opportunity(self, opportunity_id):
-        """Get list of files for an opportunity"""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT filename, created_at FROM project_files
-            WHERE opportunity_id = ?
-            ORDER BY created_at
-        """, (opportunity_id,))
-
-        files = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in files]
-
-    def get_file_content(self, opportunity_id, filename):
-        """Get content of a specific file"""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT content FROM project_files
-            WHERE opportunity_id = ? AND filename = ?
-        """, (opportunity_id, filename))
-
+        cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opportunity_id,))
         row = cursor.fetchone()
         conn.close()
+        if not row:
+            return {}
+        return dict(row)
 
-        return row['content'] if row else None
+    def _slug(self, name: str) -> str:
+        s = ''.join(c.lower() if c.isalnum() else '-' for c in name)
+        return '-'.join(p for p in s.split('-') if p)[:40]
 
+    def _project_dir(self, opp: Dict[str, Any]) -> str:
+        slug = self._slug(opp.get('name', f"opp-{opp.get('id')}"))
+        path = os.path.join(self.projects_dir, f"{opp.get('id'):04d}_{slug}")
+        os.makedirs(path, exist_ok=True)
+        return path
 
-# =============================================================================
-# MAIN
-# =============================================================================
+    def _write_files(self, base: str, files: Dict[str, str]) -> None:
+        for relpath, content in files.items():
+            full = os.path.join(base, relpath)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+    def generate_all(self, opportunity_id: int, opp: Dict[str, Any] = None) -> int:
+        """Generate the full artefact set for an opportunity. Returns file count."""
+        opp = opp or self._load_opportunity(opportunity_id)
+        if not opp:
+            return 0
+        try:
+            analysis = json.loads(opp.get('analysis_json') or '{}')
+        except Exception:
+            analysis = {}
+
+        # In-DB files
+        db_files: Dict[str, str] = {
+            'README.md': _readme(opp, analysis),
+            'architecture.md': _architecture(opp, analysis),
+            'task_list.md': _task_list(opp, analysis),
+            'demo_plan.md': _demo_plan(opp, analysis),
+            'submission_checklist.md': _submission_checklist(opp, analysis),
+        }
+        inserted = _record_files(opportunity_id, db_files, file_type='doc')
+
+        # Disk artefacts
+        base = self._project_dir(opp)
+        disk_files: Dict[str, str] = {
+            'src/main.py': _main_py(opp, analysis),
+            'frontend/index.html': _frontend_index(opp, analysis),
+            'frontend/app.js': _frontend_app_js(),
+            'frontend/style.css': _frontend_style_css(),
+            'requirements.txt': _requirements_txt(),
+            'Dockerfile': _dockerfile(),
+            '.github/workflows/deploy.yml': _github_actions_deploy(),
+            'README.md': db_files['README.md'],
+        }
+        self._write_files(base, disk_files)
+        return inserted + len(disk_files)
+
 
 if __name__ == '__main__':
-    print("Project File Generator - Challenge Hunter AI")
-    print("Use app.py to generate files for approved opportunities.")
+    # quick smoke test
+    import sys
+    from seed import seed_database
+    seed_database()
+    g = ProjectFileGenerator()
+    count = g.generate_all(1)
+    print(f"Generated {count} files for opportunity #1")
