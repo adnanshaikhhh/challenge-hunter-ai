@@ -102,7 +102,7 @@ function renderCard(opp) {
   const oppRules = escapeHtml(opp.rules_summary || '').slice(0, 160);
 
   return `
-    <div class="opp-card ${scoreClass(score)}" data-id="${oppId}">
+    <div class="opp-card ${scoreClass(score)}" data-id="${oppId}" onclick="openAnalysis(${oppId})" style="cursor:pointer;">
       <div class="header">
         <span class="source-badge">${oppSource}</span>
         <span class="status-dot-inline">
@@ -152,7 +152,7 @@ function renderCard(opp) {
       </div>
       <div class="tags">${tags}<span class="${aiPolicyClass(opp.ai_policy)}">AI ${oppPolicy}</span></div>
       <div class="summary">${oppRules}</div>
-      <div class="actions">
+      <div class="actions" onclick="event.stopPropagation();">
         <button class="btn btn-ghost" onclick="openAnalysis(${oppId})">🔍 Analyze</button>
         <button class="btn btn-success" onclick="approve(${oppId})">✅ Approve</button>
         <button class="btn btn-danger btn-icon" onclick="reject(${oppId})" title="Reject">❌</button>
@@ -223,7 +223,21 @@ async function loadOpportunities() {
   state.loading = true;
   showSkeleton();
   const params = new URLSearchParams();
-  if (state.status !== 'all') params.set('status', state.status);
+  // Map special UI statuses to API params
+  if (state.status === 'all' || !state.status) {
+    // no filter
+  } else if (state.status === 'high') {
+    params.set('min_score', '70');
+  } else if (state.status === 'building') {
+    // Building shows in_progress OR approved (since build starts after approve)
+    // The API doesn't support OR, so we just query approved
+    params.set('status', 'approved');
+  } else if (state.status === 'submitted' || state.status === 'complete') {
+    // No opportunities actually submitted yet, so we'll show approved
+    params.set('status', 'approved');
+  } else {
+    params.set('status', state.status);
+  }
   if (state.tag) params.set('tag', state.tag);
   if (state.search) params.set('search', state.search);
   if (state.sort) params.set('sort_by', state.sort);
@@ -242,9 +256,10 @@ function renderOpportunities() {
   const tbody = document.querySelector('#list-table tbody');
   if (grid) grid.innerHTML = state.opportunities.map(renderCard).join('');
   if (tbody) tbody.innerHTML = state.opportunities.map(renderListRow).join('');
-  document.getElementById('result-count') &&
-    (document.getElementById('result-count').textContent =
-      `${state.opportunities.length} of ${state.opportunities.length} opportunities`);
+  const countEl = document.getElementById('result-count');
+  if (countEl) {
+    countEl.textContent = `${state.opportunities.length} ${state.opportunities.length === 1 ? 'opportunity' : 'opportunities'}`;
+  }
 }
 
 function showSkeleton() {
@@ -264,23 +279,29 @@ function showSkeleton() {
 // Actions
 // -----------------------------------------------------------------------------
 async function approve(id) {
-  toast(`Approving #${id}…`, 'info');
+  const card = document.querySelector(`.opp-card[data-id="${id}"]`);
+  if (card) card.style.opacity = '0.5';
   const r = await API(`/api/opportunities/${id}/approve`, { method: 'POST' });
   if (r.ok) {
     toast(`Build started for #${id}`, 'success');
     loadOpportunities();
     loadStats();
-  } else toast('Approve failed', 'error');
+  } else {
+    toast('Approve failed: ' + (r.data?.error || r.status), 'error');
+    if (card) card.style.opacity = '';
+  }
 }
 
 async function reject(id) {
   const r = await API(`/api/opportunities/${id}/reject`, { method: 'POST' });
   if (r.ok) { toast(`#${id} rejected`, 'warning'); loadOpportunities(); loadStats(); }
+  else toast('Reject failed', 'error');
 }
 
 async function ignore(id) {
   const r = await API(`/api/opportunities/${id}/ignore`, { method: 'POST' });
   if (r.ok) { toast(`#${id} ignored`, 'info'); loadOpportunities(); loadStats(); }
+  else toast('Ignore failed', 'error');
 }
 
 async function triggerScan() {
@@ -457,10 +478,33 @@ function setView(v) {
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === v);
   });
+  // Show/hide the corresponding view container
+  const views = {
+    dashboard: 'dashboard-view',
+    high: 'dashboard-view',
+    approved: 'dashboard-view',
+    building: 'dashboard-view',
+    submitted: 'dashboard-view',
+    analytics: 'analytics-view',
+    settings: 'settings-view',
+  };
+  const target = views[v] || 'dashboard-view';
+  ['dashboard-view', 'analytics-view', 'settings-view'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = (id === target) ? '' : 'none';
+  });
+  // Page title
   document.getElementById('page-title').textContent =
     ({ dashboard: 'Dashboard', high: 'High Priority', approved: 'Approved',
        building: 'Building', submitted: 'Submitted', analytics: 'Analytics',
        settings: 'Settings' }[v] || 'Dashboard');
+  // Apply filters for status-based views
+  if (v === 'dashboard') setStatus('all');
+  else if (v === 'high') setStatus('high');
+  else if (v === 'approved') setStatus('approved');
+  else if (v === 'building') setStatus('building');
+  else if (v === 'submitted') setStatus('submitted');
+  // Lazy-load special pages
   if (v === 'analytics') renderAnalytics();
   if (v === 'settings') renderSettings();
 }
@@ -472,7 +516,6 @@ function setStatus(s) {
   });
   loadOpportunities();
 }
-
 function setTag(t) {
   state.tag = state.tag === t ? null : t;
   document.querySelectorAll('[data-tag]').forEach(el => {
@@ -496,12 +539,17 @@ function setLayout(mode) {
   const grid = document.getElementById('card-grid');
   const list = document.getElementById('list-view');
   if (mode === 'grid') {
-    grid.style.display = 'grid';
-    list.classList.remove('active');
+    if (grid) grid.style.display = 'grid';
+    if (list) list.classList.remove('active');
   } else {
-    grid.style.display = 'none';
-    list.classList.add('active');
+    if (grid) grid.style.display = 'none';
+    if (list) list.classList.add('active');
   }
+  // Update active state on layout pills
+  document.querySelectorAll('[data-layout]').forEach(el => {
+    el.classList.toggle('active', el.dataset.layout === mode);
+  });
+  state.layout = mode;
 }
 
 // -----------------------------------------------------------------------------

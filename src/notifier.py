@@ -136,7 +136,9 @@ def broadcast(text: str, title: Optional[str] = None) -> bool:
     if _ntfy_enabled():
         delivered = send_ntfy(title or 'Challenge Hunter', text) or delivered
     if not (_telegram_enabled() or _discord_enabled() or _ntfy_enabled()):
-        print(f"📢 [no channels] {text[:120]}...")
+        # Still log to the notifications table even without a channel,
+        # so users can see recent activity in the UI.
+        _log_notification(None, 'broadcast', text, delivered=False)
     return delivered
 
 

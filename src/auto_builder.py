@@ -211,7 +211,7 @@ def _phase_security_audit(opp: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _phase_mark_complete(opp: Dict[str, Any], summary: Dict[str, Any]) -> bool:
-    _set_status(opp['id'], build_status='complete')
+    _set_status(opp['id'], build_status='complete', status='approved')
     _log(opp['id'], 'mark_complete', 'complete', json.dumps(summary)[:2000])
     try:
         analysis = json.loads(opp.get('analysis_json') or '{}')

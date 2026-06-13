@@ -495,7 +495,12 @@ def recent_notifications():
 @app.route('/api/digest', methods=['POST'])
 def send_digest():
     ok = daily_digest()
-    return jsonify({'success': ok})
+    return jsonify({
+        'success': ok,
+        'delivered': ok,
+        'telegram_enabled': bool(os.environ.get('TELEGRAM_BOT_TOKEN')),
+        'message': 'Digest logged to notifications table. Configure TELEGRAM_BOT_TOKEN to deliver to Telegram.'
+    })
 
 
 # =============================================================================

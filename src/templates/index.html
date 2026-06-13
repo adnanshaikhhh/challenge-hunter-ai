@@ -57,7 +57,7 @@
             <button class="pill" data-status-pill="pending">Pending</button>
             <button class="pill" data-status-pill="approved">Approved</button>
             <button class="pill" data-status-pill="building">Building</button>
-            <button class="pill" data-status-pill="complete">Complete</button>
+            <button class="pill" data-status-pill="high">High Score</button>
           </div>
           <div class="tag-chips">
             <span class="tag-chip" data-tag="ai">#ai</span>
@@ -74,6 +74,10 @@
             <option value="deadline">Sort: Deadline</option>
             <option value="win">Sort: Win %</option>
           </select>
+          <div class="pill-group" style="padding:3px;">
+            <button class="pill active" data-layout="grid" onclick="setLayout('grid')">▦ Grid</button>
+            <button class="pill" data-layout="list" onclick="setLayout('list')">☰ List</button>
+          </div>
           <span id="result-count" style="font-size:12px; color:var(--text-muted);"></span>
         </div>
 
