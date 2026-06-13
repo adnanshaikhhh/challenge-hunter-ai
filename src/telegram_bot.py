@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 # =============================================================================
 # CONFIGURATION
@@ -394,13 +394,12 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline button callbacks (approve/reject/ignore)"""
+    """Handle inline keyboard button presses"""
     query = update.callback_query
     await query.answer()
 
     data = query.data
-    if not data:
-        return
+    logger.info(f"Callback: {data}")
 
     parts = data.split('_', 1)
     if len(parts) != 2:
@@ -476,6 +475,203 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # =============================================================================
+# ADDITIONAL COMMANDS
+# =============================================================================
+
+async def cmd_approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List approved opportunities"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, prize_usd, opportunity_score FROM opportunities WHERE status = 'approved' ORDER BY opportunity_score DESC LIMIT 10")
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text("✅ No approved opportunities yet")
+            return
+        text = "✅ <b>APPROVED OPPORTUNITIES</b>\n\n"
+        for r in rows:
+            text += f"#{r['id']} {r['name'][:50]} — ${r['prize_usd']:,} (score {r['opportunity_score']})\n"
+        await update.message.reply_text(text, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_building(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List currently building"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, build_status FROM opportunities WHERE build_status = 'in_progress' OR build_status = 'complete' ORDER BY updated_at DESC LIMIT 10")
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text("🔨 No builds yet")
+            return
+        text = "🔨 <b>BUILDS</b>\n\n"
+        for r in rows:
+            text += f"#{r['id']} {r['name'][:50]} — {r['build_status']}\n"
+        await update.message.reply_text(text, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_submitted(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List submitted entries"""
+    await update.message.reply_text("🏆 No submissions yet. Approve an opportunity to start building.")
+
+
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send daily digest now"""
+    from notifier import daily_digest
+    ok = daily_digest()
+    await update.message.reply_text("📊 Daily digest sent" if ok else "⚠️ Digest logged but no channels configured")
+
+
+async def cmd_top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Top 5 by expected value"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, prize_usd, expected_value, opportunity_score FROM opportunities WHERE status = 'pending' ORDER BY expected_value DESC LIMIT 5")
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text("🏆 No pending opportunities")
+            return
+        text = "🏆 <b>TOP 5 BY EXPECTED VALUE</b>\n\n"
+        for i, r in enumerate(rows, 1):
+            text += f"{i}. {r['name'][:40]}\n   ${r['prize_usd']:,} (EV ${r['expected_value']:,.0f}, score {r['opportunity_score']})\n"
+        await update.message.reply_text(text, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_urgent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Opportunities with < 7 days remaining"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, days_remaining, prize_usd FROM opportunities WHERE status = 'pending' AND days_remaining <= 7 ORDER BY days_remaining ASC LIMIT 10")
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text("⏰ No urgent opportunities (< 7 days)")
+            return
+        text = "⏰ <b>URGENT: < 7 DAYS REMAINING</b>\n\n"
+        for r in rows:
+            text += f"#{r['id']} {r['name'][:50]} — {r['days_remaining']}d (${r['prize_usd']:,})\n"
+        await update.message.reply_text(text, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Opportunities added in last 24 hours"""
+    import sqlite3
+    from datetime import datetime, timedelta
+    try:
+        cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, prize_usd, created_at FROM opportunities WHERE created_at > ? ORDER BY created_at DESC LIMIT 10", (cutoff,))
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text("🆕 No new opportunities in last 24h")
+            return
+        text = "🆕 <b>NEW IN LAST 24H</b>\n\n"
+        for r in rows:
+            text += f"#{r['id']} {r['name'][:50]} — ${r['prize_usd']:,}\n"
+        await update.message.reply_text(text, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_build_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all active builds"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, build_status, github_repo_url FROM opportunities WHERE build_status != 'none' ORDER BY updated_at DESC LIMIT 10")
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            await update.message.reply_text("🔨 No builds yet")
+            return
+        text = "🔨 <b>BUILD STATUS</b>\n\n"
+        for r in rows:
+            text += f"#{r['id']} {r['name'][:40]} — {r['build_status']}\n"
+            if r['github_repo_url']:
+                text += f"   {r['github_repo_url']}\n"
+        await update.message.reply_text(text, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def handle_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /approve_X, /reject_X, /ignore_X, /analyze_X, /submit_X commands"""
+    import re
+    import sqlite3
+    if not update.message or not update.message.text:
+        return
+    match = re.match(r'^/(approve|reject|ignore|analyze|submit)_(\d+)$', update.message.text.strip())
+    if not match:
+        return
+    action, opp_id_str = match.groups()
+    opp_id = int(opp_id_str)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, status FROM opportunities WHERE id = ?", (opp_id,))
+        opp = cursor.fetchone()
+        if not opp:
+            await update.message.reply_text(f"❌ Opportunity #{opp_id} not found")
+            conn.close()
+            return
+        opp = dict(opp)
+        if action == 'approve':
+            cursor.execute("UPDATE opportunities SET status = 'approved', build_status = 'in_progress', updated_at = ? WHERE id = ?",
+                          (datetime.now().isoformat(), opp_id))
+            conn.commit()
+            conn.close()
+            from generator import ProjectFileGenerator
+            gen = ProjectFileGenerator(DB_PATH)
+            count = gen.generate_all(opp_id, opp)
+            await update.message.reply_text(f"✅ APPROVED #{opp_id}\n\n📄 {count} project files generated.\n\nAuto-build started in background.")
+        elif action == 'reject':
+            cursor.execute("UPDATE opportunities SET status = 'rejected', updated_at = ? WHERE id = ?",
+                          (datetime.now().isoformat(), opp_id))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"❌ Rejected #{opp_id}")
+        elif action == 'ignore':
+            cursor.execute("UPDATE opportunities SET status = 'ignored', updated_at = ? WHERE id = ?",
+                          (datetime.now().isoformat(), opp_id))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"🔕 Ignored #{opp_id}")
+        elif action == 'analyze':
+            await update.message.reply_text(f"📊 Open #{opp_id} in the dashboard to view full analysis:\nhttps://challenge-hunter-ai-production.up.railway.app")
+        elif action == 'submit':
+            await update.message.reply_text(f"🏆 To submit #{opp_id}, complete the build first via the dashboard.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+# =============================================================================
 # MAIN - START POLLING
 # =============================================================================
 
@@ -490,12 +686,23 @@ def start_polling():
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Add handlers
+    # Command handlers
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("list", cmd_list))
     application.add_handler(CommandHandler("stats", cmd_stats))
     application.add_handler(CommandHandler("scan", cmd_scan))
+    application.add_handler(CommandHandler("approved", cmd_approved))
+    application.add_handler(CommandHandler("building", cmd_building))
+    application.add_handler(CommandHandler("submitted", cmd_submitted))
+    application.add_handler(CommandHandler("digest", cmd_digest))
+    application.add_handler(CommandHandler("top5", cmd_top5))
+    application.add_handler(CommandHandler("urgent", cmd_urgent))
+    application.add_handler(CommandHandler("new", cmd_new))
+    application.add_handler(CommandHandler("build_status", cmd_build_status))
+
+    # Inline /<action>_<id> commands (e.g. /approve_3, /reject_5)
+    application.add_handler(MessageHandler(filters.Regex(r'^/(approve|reject|ignore|analyze|submit)_\d+$'), handle_action_command))
     application.add_handler(CallbackQueryHandler(handle_callback_query))
 
     print("📱 Telegram bot is polling for commands...")

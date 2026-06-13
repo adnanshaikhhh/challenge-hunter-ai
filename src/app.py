@@ -240,6 +240,33 @@ def approve_opportunity(opp_id):
     return jsonify({'success': True, 'building': True, **fields})
 
 
+@app.route('/api/opportunities/<int:opp_id>/build', methods=['POST'])
+def build_opportunity(opp_id):
+    """
+    Trigger the actual AI code-generation step.
+    Requires OPENROUTER_API_KEY to be set.
+    Runs in a background thread so the API stays responsive.
+    """
+    import threading
+    from code_generator import build_project
+
+    def _bg():
+        try:
+            result = build_project(opp_id)
+            print(f"🔨 Build #{opp_id}: {result.get('success')}, files={result.get('files_generated', 0)}")
+        except Exception as e:
+            print(f"❌ Build #{opp_id} crashed: {e}")
+
+    t = threading.Thread(target=_bg, daemon=True, name=f"build-{opp_id}")
+    t.start()
+    return jsonify({
+        'success': True,
+        'message': f'Build started for opportunity #{opp_id}. Check back in 1-2 minutes.',
+        'opportunity_id': opp_id,
+        'note': 'Requires OPENROUTER_API_KEY env var to be set.'
+    })
+
+
 @app.route('/api/opportunities/<int:opp_id>/reject', methods=['POST'])
 def reject_opportunity(opp_id):
     fields = _set_status(opp_id, 'rejected')
@@ -279,15 +306,35 @@ def rescore(opp_id):
 # Scanner endpoints
 # =============================================================================
 
-def _run_scan_thread(scan_id: str):
+def _trigger_scan(scan_id: str):
     engine = ScannerEngine(DB_PATH)
     engine.run_full_scan()
 
 
+# Rate limiting for /api/scan
+import time as _time
+_scan_rate_limit = {}  # IP -> [timestamps]
+SCAN_RATE_LIMIT_WINDOW = 60  # seconds
+SCAN_RATE_LIMIT_MAX = 5  # max scans per window
+
+
 @app.route('/api/scan', methods=['POST'])
 def trigger_scan():
+    # Rate limit by IP
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
+    now = _time.time()
+    history = _scan_rate_limit.get(client_ip, [])
+    history = [t for t in history if now - t < SCAN_RATE_LIMIT_WINDOW]
+    if len(history) >= SCAN_RATE_LIMIT_MAX:
+        return jsonify({
+            'error': 'rate_limited',
+            'message': f'Max {SCAN_RATE_LIMIT_MAX} scans per {SCAN_RATE_LIMIT_WINDOW}s. Slow down.',
+            'retry_after': SCAN_RATE_LIMIT_WINDOW
+        }), 429
+    history.append(now)
+    _scan_rate_limit[client_ip] = history
     scan_id = str(uuid.uuid4())[:8]
-    t = threading.Thread(target=_run_scan_thread, args=(scan_id,), daemon=True)
+    t = threading.Thread(target=_trigger_scan, args=(scan_id,), daemon=True)
     t.start()
     return jsonify({'triggered': True, 'scan_id': scan_id})
 

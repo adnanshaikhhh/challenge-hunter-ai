@@ -286,9 +286,39 @@ async function approve(id) {
     toast(`Build started for #${id}`, 'success');
     loadOpportunities();
     loadStats();
+    // Automatically trigger the AI code-generation step too
+    setTimeout(() => triggerBuild(id), 500);
   } else {
     toast('Approve failed: ' + (r.data?.error || r.status), 'error');
     if (card) card.style.opacity = '';
+  }
+}
+
+async function triggerBuild(id) {
+  const r = await API(`/api/opportunities/${id}/build`, { method: 'POST' });
+  if (r.ok) {
+    toast(`AI code generation started for #${id}. Check back in 1-2 minutes.`, 'info');
+    // Poll for completion
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      const stat = await API(`/api/opportunities/${id}`);
+      if (stat.ok && stat.data && stat.data.build_status === 'complete') {
+        clearInterval(poll);
+        toast(`✅ Build #${id} complete!`, 'success');
+        loadOpportunities();
+        loadStats();
+      } else if (attempts > 30 || (stat.ok && stat.data && stat.data.build_status === 'failed')) {
+        clearInterval(poll);
+        if (attempts > 30) {
+          toast(`Build #${id} is taking longer than expected`, 'warning');
+        } else {
+          toast(`Build #${id} failed. Check OPENROUTER_API_KEY.`, 'error');
+        }
+      }
+    }, 4000);
+  } else {
+    toast('Build trigger failed: ' + (r.data?.error || r.status), 'error');
   }
 }
 
@@ -305,12 +335,25 @@ async function ignore(id) {
 }
 
 async function triggerScan() {
+  const btn = document.getElementById('scan-btn');
+  const originalText = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Scanning…';
+  }
   toast('Scan triggered', 'info');
-  const r = await API('/api/scan', { method: 'POST' });
-  if (r.ok) {
-    toast(`Scan started (${r.data.scan_id})`, 'success');
-    setTimeout(() => { loadOpportunities(); loadStats(); }, 15000);
-  } else toast('Scan failed', 'error');
+  try {
+    const r = await API('/api/scan', { method: 'POST' });
+    if (r.ok) {
+      toast(`Scan started (${r.data.scan_id})`, 'success');
+      setTimeout(() => { loadOpportunities(); loadStats(); }, 15000);
+    } else toast('Scan failed', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalText || '⚡ Scan Now';
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -386,12 +429,11 @@ async function openAnalysis(id) {
       🔗 Open source
     </a>
     <div style="display:flex; gap:0.5rem; margin-top:1rem;">
-      <button class="btn btn-success" style="flex:1;" onclick="approve(${opp.id}); document.getElementById('modal').classList.remove('show');">✅ Approve</button>
+      <button class="btn btn-success" style="flex:1;" onclick="approve(${opp.id}); document.getElementById('modal').classList.remove('show');">✅ Approve & Build</button>
       <button class="btn btn-danger" onclick="reject(${opp.id}); document.getElementById('modal').classList.remove('show');">❌</button>
       <button class="btn btn-ghost" onclick="ignore(${opp.id}); document.getElementById('modal').classList.remove('show');">🔕</button>
     </div>
   `;
-
   const tech = rp.tech_stack || {};
   const techAll = [...(tech.frontend || []), ...(tech.backend || []),
     ...(tech.database || []), ...(tech.ai || []), ...(tech.deployment || [])];

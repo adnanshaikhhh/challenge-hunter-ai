@@ -73,10 +73,26 @@ def detect_ai_policy(text: str) -> str:
     if not text:
         return 'unclear'
     t = text.lower()
+    # Check banned first (more specific)
     if any(kw in t for kw in AI_BANNED_KEYWORDS):
         return 'banned'
+    # Allowed keywords (exact match)
     if any(kw in t for kw in AI_ALLOWED_KEYWORDS):
         return 'allowed'
+    # Heuristic patterns for allowed:
+    # "ai ... allowed", "ai ... permitted", "use ... ai", "llm ... allowed"
+    import re
+    allowed_patterns = [
+        r'\bai\b.{0,20}\b(allowed|permitted|encouraged|welcome|ok)\b',
+        r'\b(allowed|permitted|encouraged|welcome|ok)\b.{0,20}\bai\b',
+        r'\buse\b.{0,15}\b(ai|llm|chatgpt|copilot|claude)\b',
+        r'\b(ai|llm|chatgpt|copilot|claude)\b.{0,15}\b(allowed|permitted|encouraged|welcome|ok)\b',
+        r'\bany\s+tools?\b',
+        r'\bany\s+programming\b',
+    ]
+    for pat in allowed_patterns:
+        if re.search(pat, t):
+            return 'allowed'
     return 'unclear'
 
 

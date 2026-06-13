@@ -69,10 +69,21 @@ def _load_opportunity(opportunity_id: int) -> Dict[str, Any]:
     return dict(row)
 
 
-def _safe_run(cmd: str, cwd: Optional[str] = None, timeout: int = 120) -> Dict[str, Any]:
+def _safe_run(cmd, cwd: Optional[str] = None, timeout: int = 120) -> Dict[str, Any]:
+    """
+    Safely run a subprocess. `cmd` must be a list of args (NOT a shell string).
+    Use list form to avoid shell-injection (bandit B602).
+    """
+    import shlex
+    # Backwards-compat: if a string is passed, parse it with shlex but warn.
+    if isinstance(cmd, str):
+        # shlex.split preserves quoting safely
+        cmd_list = shlex.split(cmd)
+    else:
+        cmd_list = list(cmd)
     try:
         result = subprocess.run(
-            cmd, shell=True, cwd=cwd,
+            cmd_list, shell=False, cwd=cwd,
             capture_output=True, text=True, timeout=timeout
         )
         return {
@@ -159,21 +170,109 @@ def _phase_hermes_brief(opp: Dict[str, Any]) -> Dict[str, Any]:
     try:
         analysis = json.loads(opp.get('analysis_json') or '{}')
         rec = analysis.get('recommended_project', {})
+        tech = rec.get('tech_stack', {})
+        tech_flat = []
+        for cat in ['frontend', 'backend', 'database', 'ai', 'deployment']:
+            tech_flat.extend(tech.get(cat, []))
+        tech_str = ', '.join(tech_flat) if tech_flat else 'TBD'
+        requirements = analysis.get('requirements', [])
+        req_text = chr(10).join(f'  - {r}' for r in requirements) if requirements else '  - TBD'
+        alt_projects = analysis.get('alternative_projects', [])
+        alt_text = chr(10).join(f'  - {a.get("name", "?")}: {a.get("concept", "?")} ({a.get("build_days", "?")}d)'
+                                for a in alt_projects) if alt_projects else '  - (none)'
+        risks = analysis.get('risks', [])
+        risk_text = chr(10).join(f'  - {r}' for r in risks) if risks else '  - Standard deadline risk'
+        checklist = chr(10).join(f'  [ ] {item}'
+                                for item in [
+                                    'Working demo deployed (live URL)',
+                                    'GitHub repo public with README',
+                                    '2-3 minute demo video recorded',
+                                    'Submission form filled with project description',
+                                    'Screenshots + cover image prepared',
+                                    'Tech stack tags selected',
+                                    'Submitted at least 24h before deadline',
+                                ])
+
         brief_path = os.path.join(PROJECTS_DIR, f"hermes_session_{opp['id']}.txt")
         os.makedirs(PROJECTS_DIR, exist_ok=True)
+
+        brief = f"""═══════════════════════════════════════════════════════════
+HERMES AUTO-BUILD SESSION BRIEF
+═══════════════════════════════════════════════════════════
+Competition: {opp.get('name')}
+URL: {opp.get('url')}
+Prize: ${int(opp.get('prize_usd') or 0):,}
+Deadline: {opp.get('deadline', 'TBD')}
+Days remaining: {int(opp.get('days_remaining') or 0)}
+Opportunity score: {int(opp.get('opportunity_score') or 0)}/100
+Win probability: {int(opp.get('win_probability') or 0)}%
+AI policy: {opp.get('ai_policy', 'unclear')}
+Difficulty: {opp.get('difficulty', 'medium')}
+
+PROJECT TO BUILD:
+  Name: {rec.get('name', 'TBD')}
+  Tagline: {rec.get('tagline', '')}
+  Concept: {rec.get('concept', '')}
+  Problem solved: {rec.get('problem_solved', '')}
+  Estimated build: {rec.get('estimated_build_days', 7)} days
+
+TECH STACK:
+  Frontend: {', '.join(tech.get('frontend', [])) or 'TBD'}
+  Backend:  {', '.join(tech.get('backend', [])) or 'TBD'}
+  Database:  {', '.join(tech.get('database', [])) or 'TBD'}
+  AI:        {', '.join(tech.get('ai', [])) or 'TBD'}
+  Deploy:    {', '.join(tech.get('deployment', [])) or 'TBD'}
+
+KEY FEATURES:
+{chr(10).join(f'  - {f}' for f in rec.get('key_features', [])) or '  - TBD'}
+
+DEMO APPROACH:
+  {rec.get('demo_approach', 'TBD')}
+
+WOW FACTOR:
+  {rec.get('wow_factor', 'TBD')}
+
+REQUIREMENTS:
+{req_text}
+
+RISKS:
+{risk_text}
+
+ALTERNATIVE PROJECTS:
+{alt_text}
+
+SUBMISSION STRATEGY:
+  {analysis.get('submission_strategy', 'Standard: lead with demo, submit 24h early.')}
+
+JUDGE APPEAL:
+  {analysis.get('judge_appeal', 'Focus on execution, polish, and clear metrics.')}
+
+RECOMMENDED ACTION: {analysis.get('recommended_action', 'approve').upper()}
+REASONING: {analysis.get('action_reasoning', 'High score, AI-friendly rules.')}
+
+═══════════════════════════════════════════════════════════
+BUILD INSTRUCTIONS FOR HERMES:
+═══════════════════════════════════════════════════════════
+1. Create a new Hermes session
+2. Read this brief
+3. Create GitHub repository named: {rec.get('name', 'ch-project').lower().replace(' ', '-')[:50]}
+4. Generate full project source code matching the tech stack above
+5. Write all 5 planning docs (README, architecture, task_list, demo_plan, submission_checklist)
+6. Run tests to verify the code works
+7. Run a security audit (bandit)
+8. Deploy to Railway or Vercel (free tier)
+9. Record a 2-3 minute demo video
+10. Submit to: {opp.get('url', 'TBD')}
+11. Confirm submission and report back
+
+═══════════════════════════════════════════════════════════
+SUBMISSION CHECKLIST:
+═══════════════════════════════════════════════════════════
+{checklist}
+═══════════════════════════════════════════════════════════
+"""
         with open(brief_path, 'w', encoding='utf-8') as f:
-            f.write(
-                f"# HERMES BUILD BRIEF — Opportunity #{opp['id']}\n"
-                f"Competition: {opp.get('name')}\n"
-                f"URL: {opp.get('url')}\n"
-                f"Deadline: {opp.get('deadline')}\n"
-                f"Project: {rec.get('name')}\n"
-                f"Concept: {rec.get('concept')}\n"
-                f"Tech: {rec.get('tech_stack')}\n"
-                f"Build days: {rec.get('estimated_build_days')}\n"
-                f"\n# Requirements\n" + "\n".join(f"- {r}" for r in analysis.get('requirements', []))
-                + f"\n\n# Submission strategy\n{analysis.get('submission_strategy', '')}\n"
-            )
+            f.write(brief)
         _log(opp['id'], 'hermes_brief', 'complete', brief_path)
         return {'path': brief_path}
     except Exception as e:
