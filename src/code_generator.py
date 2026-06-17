@@ -245,7 +245,7 @@ def build_project(opportunity_id: int) -> Dict[str, Any]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT name, analysis_json FROM opportunities WHERE id = ?", (opportunity_id,))
+    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opportunity_id,))
     row = cursor.fetchone()
     conn.close()
     if not row:
