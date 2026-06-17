@@ -39,7 +39,7 @@ from scorer import (
 # =============================================================================
 
 def _ensure_db() -> None:
-    """Create schema and seed if missing. Idempotent."""
+    """Create schema and seed if missing. Idempotent. Migrates v2.1 tables."""
     new_db = not os.path.exists(DB_PATH)
     if new_db:
         os.makedirs(os.path.dirname(DB_PATH) or '.', exist_ok=True)
@@ -50,17 +50,21 @@ def _ensure_db() -> None:
             conn.executescript(f.read())
         print("   ✅ schema created", flush=True)
     else:
-        # Always ensure schema exists (handles existing-DB-without-tables case)
+        # Run schema (uses CREATE IF NOT EXISTS — safe)
         if os.path.exists(SCHEMA_PATH):
             with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
                 conn.executescript(f.read())
-            print("   ✅ schema verified", flush=True)
-    # Verify the opportunities table actually exists
+            print("   ✅ schema verified (migrated)", flush=True)
+
+    # Verify core tables exist
     cur = conn.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='opportunities'")
     if not cur.fetchone():
-        print("   ⚠️  opportunities table missing after schema run", flush=True)
+        print("   ⚠️  core tables missing, re-running schema", flush=True)
+        with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
+            conn.executescript(f.read())
     conn.close()
+
     if new_db:
         # auto-seed
         from seed import seed_database

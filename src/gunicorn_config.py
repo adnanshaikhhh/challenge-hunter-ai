@@ -41,6 +41,5 @@ def post_fork(server, worker):
     except Exception as e:
         log.exception(f"Scheduler start failed in worker {worker.pid}: {e}")
 
-
 def worker_abort(worker):
     log.warning(f"Worker {worker.pid} aborted (timeout)")
