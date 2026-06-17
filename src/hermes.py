@@ -147,10 +147,10 @@ def _phase_install(opportunity_id: int) -> Dict[str, Any]:
 # Phase 3: Run tests
 # =============================================================================
 
-def _phase_test(opp: Dict[str, Any]) -> Dict[str, Any]:
+def _phase_test(opportunity_id: int) -> Dict[str, Any]:
     """Run pytest in the project directory. Best-effort. Skipped if pytest not installed."""
-    _log(opp['id'], 'hermes_test', 'started')
-    base = _find_built_dir(opp['id'])
+    _log(opportunity_id, 'hermes_test', 'started')
+    base = _find_built_dir(opportunity_id)
     if not base:
         return {'ok': False, 'error': 'no_built_dir'}
 
