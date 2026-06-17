@@ -27,7 +27,7 @@ import requests
 # =============================================================================
 
 # tokenrouter.com (your custom endpoint, primary)
-# Default model: minimax-m3 (works on tokenrouter)
+# Default model: MiniMax-M3 (correct capitalization as exposed by tokenrouter)
 LLM_PRIMARY_BASE_URL = os.environ.get(
     'LLM_PRIMARY_BASE_URL',
     'https://api.tokenrouter.com/v1'
@@ -38,7 +38,7 @@ LLM_PRIMARY_KEY = os.environ.get(
 )
 LLM_PRIMARY_MODEL = os.environ.get(
     'LLM_PRIMARY_MODEL',
-    'minimax-m3'
+    'MiniMax-M3'
 )
 
 # NVIDIA NIM (fallback)
