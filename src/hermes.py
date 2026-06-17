@@ -113,19 +113,27 @@ def _phase_generate(opportunity_id: int) -> Dict[str, Any]:
 # =============================================================================
 
 def _phase_install(opportunity_id: int) -> Dict[str, Any]:
-    """Install Python deps via pip or Node deps via npm."""
+    """Install Python deps via pip or Node deps via npm. Skipped if tool not available."""
     _log(opportunity_id, 'hermes_install', 'started')
     base = _find_built_dir(opportunity_id)
     if not base:
         return {'ok': False, 'error': 'no_built_dir'}
 
     if os.path.exists(os.path.join(base, 'requirements.txt')):
+        pip_check = _run(['pip', '--version'], timeout=5)
+        if not pip_check.get('ok'):
+            _log(opportunity_id, 'hermes_install', 'skipped', 'pip not installed')
+            return {'ok': True, 'skipped': 'pip not installed'}
         result = _run(['pip', 'install', '-q', '-r', 'requirements.txt'],
                       cwd=base, timeout=HERMES_INSTALL_TIMEOUT)
         _log(opportunity_id, 'hermes_install', 'pip',
              f"ok={result['ok']} stderr={result['stderr'][:500]}")
         return {'ok': result['ok'], 'tool': 'pip', 'result': result}
     elif os.path.exists(os.path.join(base, 'package.json')):
+        npm_check = _run(['npm', '--version'], timeout=5)
+        if not npm_check.get('ok'):
+            _log(opportunity_id, 'hermes_install', 'skipped', 'npm not installed')
+            return {'ok': True, 'skipped': 'npm not installed'}
         result = _run(['npm', 'install', '--silent'],
                       cwd=base, timeout=HERMES_INSTALL_TIMEOUT)
         _log(opportunity_id, 'hermes_install', 'npm',
@@ -139,17 +147,24 @@ def _phase_install(opportunity_id: int) -> Dict[str, Any]:
 # Phase 3: Run tests
 # =============================================================================
 
-def _phase_test(opportunity_id: int) -> Dict[str, Any]:
-    """Run pytest, capture failures."""
-    _log(opportunity_id, 'hermes_test', 'started')
-    base = _find_built_dir(opportunity_id)
+def _phase_test(opp: Dict[str, Any]) -> Dict[str, Any]:
+    """Run pytest in the project directory. Best-effort. Skipped if pytest not installed."""
+    _log(opp['id'], 'hermes_test', 'started')
+    base = _find_built_dir(opp['id'])
     if not base:
         return {'ok': False, 'error': 'no_built_dir'}
 
     if os.path.exists(os.path.join(base, 'tests')) or os.path.exists(os.path.join(base, 'test_*.py')):
+        # Check if pytest is available
+        try:
+            import pytest
+        except ImportError:
+            _log(opp['id'], 'hermes_test', 'skipped', 'pytest not installed')
+            return {'ok': True, 'skipped': 'pytest not installed'}
+
         result = _run(['python', '-m', 'pytest', '-x', '--tb=short', '-q'],
                       cwd=base, timeout=HERMES_TEST_TIMEOUT)
-        _log(opportunity_id, 'hermes_test', 'pytest',
+        _log(opp['id'], 'hermes_test', 'pytest',
              f"ok={result['ok']} stdout={result['stdout'][:500]} stderr={result['stderr'][:500]}")
         return {
             'ok': result['ok'],
@@ -158,8 +173,14 @@ def _phase_test(opportunity_id: int) -> Dict[str, Any]:
             'code': result['code'],
         }
     elif os.path.exists(os.path.join(base, 'package.json')):
+        # Check if npm is available
+        npm_check = _run(['npm', '--version'], timeout=5)
+        if not npm_check.get('ok'):
+            _log(opp['id'], 'hermes_test', 'skipped', 'npm not installed')
+            return {'ok': True, 'skipped': 'npm not installed'}
+
         result = _run(['npm', 'test', '--silent'], cwd=base, timeout=HERMES_TEST_TIMEOUT)
-        _log(opportunity_id, 'hermes_test', 'npm',
+        _log(opp['id'], 'hermes_test', 'npm',
              f"ok={result['ok']} stderr={result['stderr'][:500]}")
         return {
             'ok': result['ok'],
@@ -277,6 +298,12 @@ def _phase_security(opportunity_id: int) -> Dict[str, Any]:
     if not base:
         return {'ok': False, 'error': 'no_built_dir'}
 
+    # Check if bandit is installed
+    bandit_check = _run(['python', '-m', 'bandit', '--version'], timeout=5)
+    if not bandit_check.get('ok'):
+        _log(opportunity_id, 'hermes_security', 'skipped', 'bandit not installed')
+        return {'ok': True, 'skipped': 'bandit not installed'}
+
     result = _run(['python', '-m', 'bandit', '-q', '-r', '.'],
                   cwd=base, timeout=60)
     issues = result['stdout'].count('Issue:')
@@ -294,7 +321,7 @@ def _phase_security(opportunity_id: int) -> Dict[str, Any]:
 # =============================================================================
 
 def _phase_commit(opportunity_id: int, github_url: Optional[str] = None) -> Dict[str, Any]:
-    """Commit + push to GitHub. Returns the repo URL."""
+    """Commit + push to GitHub via API (no git binary required). Returns the repo URL."""
     base = _find_built_dir(opportunity_id)
     if not base:
         return {'ok': False, 'error': 'no_built_dir'}
@@ -316,7 +343,7 @@ def _phase_commit(opportunity_id: int, github_url: Optional[str] = None) -> Dict
     except Exception:
         project_name = f"ch-{opportunity_id}"
 
-    # If we have GITHUB_TOKEN, use the deployer module
+    # Use the new git-free GitHub push
     if GITHUB_TOKEN and GITHUB_USERNAME:
         from deployer import push_to_github
         url = push_to_github(base, project_name)
@@ -325,14 +352,8 @@ def _phase_commit(opportunity_id: int, github_url: Optional[str] = None) -> Dict
             _log(opportunity_id, 'hermes_commit', 'github_pushed', url)
             return {'ok': True, 'github_url': url, 'project_name': project_name}
 
-    # Fallback: local git only
-    _run(['git', 'init', '-q'], cwd=base)
-    _run(['git', 'config', 'user.email', 'hermes@challengehunter.ai'], cwd=base)
-    _run(['git', 'config', 'user.name', 'Hermes Auto-Builder'], cwd=base)
-    _run(['git', 'add', '-A'], cwd=base)
-    res = _run(['git', 'commit', '-q', '-m', f'Hermes auto-build #{opportunity_id}'], cwd=base)
-    _log(opportunity_id, 'hermes_commit', 'local_git', res['stdout'] + res['stderr'][:200])
-    return {'ok': res['ok'], 'github_url': None, 'local_only': True, 'project_name': project_name}
+    _log(opportunity_id, 'hermes_commit', 'skipped', 'no GITHUB_TOKEN/USER')
+    return {'ok': False, 'error': 'no_github_credentials'}
 
 
 # =============================================================================

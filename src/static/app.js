@@ -3,6 +3,23 @@
    Premium UI, all views, all actions.
    ============================================================================= */
 
+// Global error handler — catches any uncaught errors and shows a toast
+// so the user never sees "nothing happens"
+window.addEventListener('error', (e) => {
+  console.error('Global error:', e.error || e.message);
+  try {
+    const stack = document.getElementById('toast-stack');
+    if (stack) {
+      const t = document.createElement('div');
+      t.className = 'toast error';
+      t.textContent = 'JS Error: ' + (e.message || 'unknown') + ' — open browser console (F12) for details';
+      t.onclick = () => t.remove();
+      stack.appendChild(t);
+      setTimeout(() => t.remove(), 8000);
+    }
+  } catch (_) {}
+});
+
 const API = async (path, opts = {}) => {
   try {
     const r = await fetch(path, {

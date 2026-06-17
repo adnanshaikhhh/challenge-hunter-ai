@@ -799,6 +799,24 @@ def stats_summary():
     return jsonify(get_stats_summary())
 
 
+@app.route('/api/admin/reset/<int:opp_id>', methods=['POST'])
+def admin_reset_opportunity(opp_id):
+    """Reset an opportunity's build state. Useful for re-testing."""
+    _set_status(opp_id, status='pending', build_status='none')
+    # Clear build log entries for this opp
+    try:
+        conn = get_db()
+        conn.execute("DELETE FROM build_log WHERE opportunity_id = ?", (opp_id,))
+        conn.execute("DELETE FROM deployments WHERE opportunity_id = ?", (opp_id,))
+        conn.execute("DELETE FROM videos WHERE opportunity_id = ?", (opp_id,))
+        conn.execute("DELETE FROM project_files WHERE opportunity_id = ?", (opp_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'success': True, 'message': f'Opportunity {opp_id} reset'})
+
+
 # =============================================================================
 # Error handlers
 # =============================================================================
