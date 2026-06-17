@@ -235,20 +235,13 @@ def build_project(opportunity_id: int) -> Dict[str, Any]:
     """
     Top-level: read the brief, call the LLM, write the files.
     Updates build_status and logs to build_log.
+    If the brief file doesn't exist, generates one on-the-fly.
     """
     import sqlite3
     from config import PROJECTS_DIR
-    from auto_builder import _log, _set_status
+    from auto_builder import _log, _set_status, _phase_hermes_brief
 
-    # Load brief
-    brief_path = os.path.join(PROJECTS_DIR, f"hermes_session_{opportunity_id}.txt")
-    if not os.path.exists(brief_path):
-        return {'success': False, 'error': f'Hermes brief not found at {brief_path}'}
-
-    with open(brief_path, 'r', encoding='utf-8') as f:
-        brief_text = f.read()
-
-    # Load opportunity
+    # Load opportunity first
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -257,6 +250,20 @@ def build_project(opportunity_id: int) -> Dict[str, Any]:
     conn.close()
     if not row:
         return {'success': False, 'error': f'Opportunity {opportunity_id} not found'}
+    opp = dict(row)
+
+    # Load or generate brief
+    brief_path = os.path.join(PROJECTS_DIR, f"hermes_session_{opportunity_id}.txt")
+    if not os.path.exists(brief_path):
+        # Auto-generate the brief on the fly
+        _set_status(opportunity_id, build_status='in_progress')
+        _log(opportunity_id, 'ai_build', 'auto_generating_brief', 'No brief found, generating...')
+        result = _phase_hermes_brief(opp)
+        if 'error' in result:
+            return {'success': False, 'error': f'Failed to generate brief: {result["error"]}'}
+
+    with open(brief_path, 'r', encoding='utf-8') as f:
+        brief_text = f.read()
 
     # Update status
     _set_status(opportunity_id, build_status='in_progress')
