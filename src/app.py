@@ -563,8 +563,183 @@ def get_settings():
         'telegram_enabled': bool(os.environ.get('TELEGRAM_BOT_TOKEN')),
         'discord_enabled': bool(os.environ.get('DISCORD_WEBHOOK_URL')),
         'ntfy_enabled': bool(os.environ.get('NTFY_TOPIC')),
-        'github_enabled': bool(os.environ.get('GITHUB_TOKEN'))
+        'github_enabled': bool(os.environ.get('GITHUB_TOKEN')),
+        'railway_enabled': bool(os.environ.get('RAILWAY_TOKEN')),
+        'vercel_enabled': bool(os.environ.get('VERCEL_TOKEN')),
+        'openrouter_enabled': bool(os.environ.get('OPENROUTER_API_KEY')),
     })
+
+
+# =============================================================================
+# v2.1: Research Engine endpoints
+# =============================================================================
+
+@app.route('/api/research/scan', methods=['POST'])
+def research_scan():
+    """Trigger a research scan to learn from past winners."""
+    import threading
+    from research import run_research_scan
+
+    def _bg():
+        result = run_research_scan()
+        print(f"🔬 Research scan: {result.get('insights_saved', 0)} insights, {result.get('duration_seconds', 0)}s")
+
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+    return jsonify({'triggered': True, 'message': 'Research scan running in background.'})
+
+
+@app.route('/api/research/data', methods=['GET'])
+def research_data():
+    """Get stored research data (past winners, judge tips)."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM research_data ORDER BY prize_usd DESC LIMIT 50")
+    rows = [row_to_dict(r) for r in cursor.fetchall()]
+    conn.close()
+    # Parse JSON fields
+    for r in rows:
+        for field in ('tech_stack', 'key_features', 'win_factors'):
+            try: r[field] = json.loads(r.get(field) or '[]')
+            except: r[field] = []
+    return jsonify({'total': len(rows), 'items': rows})
+
+
+@app.route('/api/research/patterns', methods=['GET'])
+def research_patterns():
+    """Get aggregated win patterns by category."""
+    from research import mine_win_patterns
+    return jsonify({'patterns': mine_win_patterns()})
+
+
+@app.route('/api/research/for/<int:opp_id>', methods=['GET'])
+def research_for_opp(opp_id):
+    """Get research relevant to a specific opportunity."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    from research import get_research_for_opportunity
+    return jsonify(get_research_for_opportunity(row_to_dict(row)))
+
+
+# =============================================================================
+# v2.1: Auto-Deploy endpoints
+# =============================================================================
+
+@app.route('/api/deploy/<int:opp_id>', methods=['POST'])
+def deploy_opportunity(opp_id):
+    """Deploy the generated project to Railway/Vercel/GitHub."""
+    import threading
+    from deployer import deploy_project
+
+    def _bg():
+        result = deploy_project(opp_id)
+        print(f"🚀 Deploy #{opp_id}: {result.get('platform', '?')} - {result.get('success')}")
+
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+    return jsonify({
+        'triggered': True,
+        'message': f'Deployment started for #{opp_id}. Check back in 1-2 minutes.',
+    })
+
+
+@app.route('/api/deployments', methods=['GET'])
+def list_deployments():
+    """List all deployments."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM deployments ORDER BY id DESC LIMIT 50")
+    rows = [row_to_dict(r) for r in cursor.fetchall()]
+    conn.close()
+    for r in rows:
+        try: r['build_log'] = json.loads(r.get('build_log') or '{}')
+        except: r['build_log'] = {}
+    return jsonify({'items': rows})
+
+
+# =============================================================================
+# v2.1: Demo Video endpoints
+# =============================================================================
+
+@app.route('/api/video/<int:opp_id>/generate', methods=['POST'])
+def video_generate(opp_id):
+    """Generate a demo video for an opportunity."""
+    import threading
+    from video_gen import generate_demo_video
+
+    def _bg():
+        result = generate_demo_video(opp_id)
+        print(f"🎬 Video #{opp_id}: success={result.get('success')}, file={result.get('file_path', '?')[:60]}")
+
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+    return jsonify({
+        'triggered': True,
+        'message': f'Video generation started for #{opp_id}. Takes 1-2 minutes.',
+    })
+
+
+@app.route('/api/videos', methods=['GET'])
+def list_videos():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM videos ORDER BY id DESC LIMIT 50")
+    rows = [row_to_dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify({'items': rows})
+
+
+# =============================================================================
+# v2.1: Submission endpoints
+# =============================================================================
+
+@app.route('/api/submit/<int:opp_id>/devpost', methods=['POST'])
+def submit_devpost(opp_id):
+    """Generate a Devpost submission package."""
+    from submitter import submit_to_devpost
+    return jsonify(submit_to_devpost(opp_id))
+
+
+@app.route('/api/submit/<int:opp_id>/package', methods=['GET'])
+def submit_package(opp_id):
+    """Get a generic submission package (any platform)."""
+    from submitter import generate_submission_package
+    return jsonify(generate_submission_package(opp_id))
+
+
+@app.route('/api/submissions', methods=['GET'])
+def list_submissions():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM submissions ORDER BY id DESC LIMIT 50")
+    rows = [row_to_dict(r) for r in cursor.fetchall()]
+    conn.close()
+    for r in rows:
+        try: r['form_data'] = json.loads(r.get('form_data') or '{}')
+        except: r['form_data'] = {}
+    return jsonify({'items': rows})
+
+
+@app.route('/api/submissions/<int:sub_id>/result', methods=['POST'])
+def submit_result(sub_id):
+    """Record a win/loss result for a submission."""
+    data = request.get_json(silent=True) or {}
+    result = data.get('result', 'pending')
+    notes = data.get('notes', '')
+    from submitter import record_result
+    ok = record_result(sub_id, result, notes)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/stats/wins', methods=['GET'])
+def win_stats():
+    from submitter import get_win_loss_stats
+    return jsonify(get_win_loss_stats())
 
 
 # =============================================================================

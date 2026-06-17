@@ -147,10 +147,12 @@ function renderCard(opp) {
       <div class="summary">${oppRules}</div>
       <div class="actions" onclick="event.stopPropagation();">
         <button class="btn btn-ghost" onclick="openAnalysis(${oppId})">🔍 Analyze</button>
-        <button class="btn btn-success" onclick="approve(${oppId})">✅ Approve</button>
-        <button class="btn btn-primary btn-icon" onclick="buildNow(${oppId})" title="Run AI code generation">🤖</button>
+        <button class="btn btn-success" onclick="approve(${oppId})">✅</button>
+        <button class="btn btn-primary btn-icon" onclick="buildNow(${oppId})" title="Build code (needs OPENROUTER_API_KEY)">🤖</button>
+        <button class="btn btn-icon" onclick="deployNow(${oppId})" title="Deploy to Railway/Vercel" style="background:#10b981;color:white;">🚀</button>
+        <button class="btn btn-icon" onclick="videoNow(${oppId})" title="Generate demo video" style="background:#f59e0b;color:white;">🎬</button>
+        <button class="btn btn-icon" onclick="submitNow(${oppId})" title="Generate submission package" style="background:#8b5cf6;color:white;">📝</button>
         <button class="btn btn-danger btn-icon" onclick="reject(${oppId})" title="Reject">❌</button>
-        <button class="btn btn-ghost btn-icon" onclick="ignore(${oppId})" title="Ignore">🔕</button>
       </div>
     </div>
   `;
@@ -321,6 +323,60 @@ async function buildNow(id) {
     }, 5000);
   } else {
     toast('Build trigger failed: ' + (r.data?.error || r.status), 'error');
+  }
+}
+
+async function deployNow(id) {
+  if (!confirm(`🚀 Deploy #${id}?\n\nThis pushes the generated code to GitHub and (if Railway/Vercel tokens are set) deploys it live.\n\nRequires GITHUB_TOKEN (+ optionally RAILWAY_TOKEN / VERCEL_TOKEN) on the server.`)) {
+    return;
+  }
+  toast('🚀 Deploy started...', 'info');
+  const r = await API(`/api/deploy/${id}`, { method: 'POST' });
+  if (r.ok) {
+    toast(`Deployment triggered for #${id}. Check back in 1-2 min.`, 'success');
+  } else {
+    toast('Deploy failed: ' + (r.data?.error || r.status), 'error');
+  }
+}
+
+async function videoNow(id) {
+  if (!confirm(`🎬 Generate demo video for #${id}?\n\nAI writes a script, generates slides, and (if gTTS/ffmpeg available) renders an MP4.\n\nTakes 1-2 minutes.`)) {
+    return;
+  }
+  toast('🎬 Video generation started...', 'info');
+  const r = await API(`/api/video/${id}/generate`, { method: 'POST' });
+  if (r.ok) {
+    toast(`Video started for #${id}. Check back in 1-2 min.`, 'success');
+  } else {
+    toast('Video failed: ' + (r.data?.error || r.status), 'error');
+  }
+}
+
+async function submitNow(id) {
+  toast('📝 Generating submission package...', 'info');
+  const r = await API(`/api/submit/${id}/package`);
+  if (r.ok && r.data.package) {
+    const pkg = r.data.package;
+    const lines = [
+      '📋 SUBMISSION PACKAGE',
+      '',
+      `Project: ${pkg.project?.name || '?'}`,
+      `Tagline: ${pkg.project?.tagline || ''}`,
+      `Deadline: ${pkg.deadline} (${pkg.days_remaining}d remaining)`,
+      '',
+      '--- DESCRIPTION ---',
+      pkg.project?.description?.slice(0, 600) + '...',
+      '',
+      '--- TECH STACK ---',
+      Object.entries(pkg.project?.tech_stack || {}).map(([k, v]) => `${k}: ${(v || []).join(', ')}`).join('\n'),
+      '',
+      '--- CHECKLIST ---',
+      Object.entries(pkg.submission_checklist || {}).map(([k, v]) => `${k}: ${v}`).join('\n'),
+    ];
+    alert(lines.join('\n'));
+    toast('Submission package ready — see alert', 'success');
+  } else {
+    toast('Package failed: ' + (r.data?.error || r.status), 'error');
   }
 }
 

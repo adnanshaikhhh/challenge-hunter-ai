@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""
+Challenge Hunter AI v2.1 — Auto-Deploy
+Takes generated code from code_generator, packages it, and deploys to Railway or Vercel.
+Returns a live URL.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import time
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+import requests
+
+from config import DB_PATH, GITHUB_TOKEN, GITHUB_USERNAME, PROJECTS_DIR
+
+
+# =============================================================================
+# Railway deployment
+# =============================================================================
+
+def _railway_api(path: str, method: str = 'GET', body: Optional[Dict] = None,
+                 token: Optional[str] = None) -> Dict[str, Any]:
+    """Call Railway's GraphQL API."""
+    api_token = token or os.environ.get('RAILWAY_TOKEN', '')
+    if not api_token:
+        return {'error': 'no_railway_token', 'message': 'RAILWAY_TOKEN env var not set'}
+    url = f"https://backboard.railway.app/graphql/v1{path}"
+    try:
+        r = requests.request(
+            method, url,
+            json=body or {},
+            headers={'Authorization': f'Bearer {api_token}', 'Content-Type': 'application/json'},
+            timeout=30
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def deploy_to_railway(project_id: str, service_name: str, source_dir: str) -> Dict[str, Any]:
+    """
+    Deploy a local directory to Railway as a new service.
+    Requires RAILWAY_TOKEN + PROJECT_ID env vars.
+    """
+    if not os.path.isdir(source_dir):
+        return {'success': False, 'error': f'Source dir not found: {source_dir}'}
+
+    token = os.environ.get('RAILWAY_TOKEN', '')
+    project = project_id or os.environ.get('RAILWAY_PROJECT_ID', '')
+    if not token or not project:
+        return {
+            'success': False,
+            'error': 'missing_credentials',
+            'message': 'Set RAILWAY_TOKEN and RAILWAY_PROJECT_ID env vars',
+        }
+
+    # Step 1: create service
+    # Railway v2 API uses GraphQL mutations
+    mutation_create = """
+    mutation serviceCreate($projectId: String!, $name: String!) {
+        serviceCreate(projectId: $projectId, name: $name) {
+            id
+            name
+        }
+    }
+    """
+    result = _railway_api('', 'POST',
+        body={'query': mutation_create, 'variables': {'projectId': project, 'name': service_name}},
+        token=token)
+    if 'errors' in result or 'error' in result:
+        return {'success': False, 'error': 'create_failed', 'detail': result}
+
+    service = (result.get('data') or {}).get('serviceCreate') or {}
+    service_id = service.get('id')
+    if not service_id:
+        return {'success': False, 'error': 'no_service_id', 'detail': result}
+
+    # Step 2: trigger deploy from a GitHub repo (Railway deploys from Git, not local)
+    # We need to push to GitHub first via deployer.github module
+    github_url = push_to_github(source_dir, service_name)
+    if not github_url:
+        return {'success': False, 'error': 'github_push_failed', 'service_id': service_id}
+
+    # Step 3: link the GitHub repo to the Railway service
+    mutation_link = """
+    mutation serviceConnect($id: String!, $repo: String!, $branch: String!) {
+        serviceConnect(id: $id, repo: $repo, branch: $branch) {
+            id
+        }
+    }
+    """
+    repo_full = github_url.replace('https://github.com/', '')
+    link_result = _railway_api('', 'POST',
+        body={'query': mutation_link, 'variables': {'id': service_id, 'repo': repo_full, 'branch': 'main'}},
+        token=token)
+
+    return {
+        'success': True,
+        'service_id': service_id,
+        'github_url': github_url,
+        'railway_dashboard': f'https://railway.com/project/{project}/service/{service_id}',
+        'message': 'Service created and linked. Railway will deploy automatically.',
+    }
+
+
+# =============================================================================
+# GitHub deployment (required for Railway)
+# =============================================================================
+
+def push_to_github(source_dir: str, repo_name: str) -> Optional[str]:
+    """
+    Create a GitHub repo from a local directory and push it.
+    Returns the GitHub URL on success, None on failure.
+    """
+    if not GITHUB_TOKEN or not GITHUB_USERNAME:
+        print("⚠️  GITHUB_TOKEN or GITHUB_USERNAME not set — cannot push to GitHub")
+        return None
+
+    safe_name = re.sub(r'[^a-z0-9-]', '-', repo_name.lower())[:50].strip('-')
+    headers = {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github+json',
+    }
+
+    # Create repo
+    try:
+        r = requests.post(
+            'https://api.github.com/user/repos',
+            headers=headers,
+            json={
+                'name': safe_name,
+                'description': f'Generated by Challenge Hunter AI — {repo_name}',
+                'private': False,
+                'auto_init': False,
+            },
+            timeout=30
+        )
+        if r.status_code not in (200, 201):
+            if 'name already exists' in r.text:
+                # Repo exists, just push to it
+                pass
+            else:
+                print(f"⚠️  GitHub create failed: {r.status_code} {r.text[:200]}")
+                return None
+    except Exception as e:
+        print(f"⚠️  GitHub create error: {e}")
+        return None
+
+    # Local git operations
+    try:
+        # Init / configure / commit / push
+        cmds = [
+            ['git', 'init', '-q'],
+            ['git', 'config', 'user.email', 'challenges@local.dev'],
+            ['git', 'config', 'user.name', 'Challenge Hunter AI'],
+            ['git', 'add', '-A'],
+            ['git', 'commit', '-q', '-m', 'Initial commit from Challenge Hunter AI'],
+        ]
+        for cmd in cmds:
+            subprocess.run(cmd, cwd=source_dir, check=True, capture_output=True, timeout=30)
+
+        # Set remote and push
+        remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_USERNAME}/{safe_name}.git"
+        subprocess.run(['git', 'remote', 'remove', 'origin'], cwd=source_dir, capture_output=True, timeout=10)
+        subprocess.run(['git', 'remote', 'add', 'origin', remote_url], cwd=source_dir, check=True, capture_output=True, timeout=10)
+        # Ensure main branch
+        subprocess.run(['git', 'branch', '-M', 'main'], cwd=source_dir, check=True, capture_output=True, timeout=10)
+        result = subprocess.run(['git', 'push', '-u', 'origin', 'main', '--force'],
+                              cwd=source_dir, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            print(f"⚠️  git push failed: {result.stderr[:300]}")
+            return None
+    except subprocess.TimeoutExpired as e:
+        print(f"⚠️  git operation timed out: {e}")
+        return None
+    except Exception as e:
+        print(f"⚠️  git error: {e}")
+        return None
+
+    return f"https://github.com/{GITHUB_USERNAME}/{safe_name}"
+
+
+# =============================================================================
+# Vercel deployment (alternative)
+# =============================================================================
+
+def deploy_to_vercel(source_dir: str, project_name: str) -> Dict[str, Any]:
+    """Deploy to Vercel. Requires VERCEL_TOKEN env var."""
+    token = os.environ.get('VERCEL_TOKEN', '')
+    if not token:
+        return {'success': False, 'error': 'no_vercel_token'}
+
+    # Package as tar
+    import tarfile
+    import io
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
+        tar.add(source_dir, arcname='.')
+    tar_buffer.seek(0)
+
+    try:
+        r = requests.post(
+            'https://api.vercel.com/v13/deployments',
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/tar',
+            },
+            data=tar_buffer.read(),
+            params={'name': project_name, 'target': 'production'},
+            timeout=120
+        )
+        r.raise_for_status()
+        d = r.json()
+        return {
+            'success': True,
+            'deployment_id': d.get('id'),
+            'url': d.get('url'),
+            'inspect_url': d.get('inspectorUrl'),
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+# =============================================================================
+# Universal deploy — picks best available platform
+# =============================================================================
+
+def deploy_project(opportunity_id: int) -> Dict[str, Any]:
+    """
+    Find the most recent generated project for this opportunity and deploy it.
+    """
+    import sqlite3
+    from code_generator import write_generated_files
+
+    # Find the project dir
+    base = PROJECTS_DIR
+    candidates = []
+    if os.path.isdir(base):
+        for d in os.listdir(base):
+            full = os.path.join(base, d)
+            if os.path.isdir(full) and d.startswith(f"{opportunity_id:04d}_") and d.endswith('_built'):
+                candidates.append(full)
+    if not candidates:
+        return {'success': False, 'error': 'no_built_project_found',
+                'hint': 'Run Build Now first to generate the project files'}
+
+    # Use the most recent
+    source_dir = max(candidates, key=os.path.getmtime)
+    project_name = os.path.basename(source_dir).replace(f"{opportunity_id:04d}_", '').replace('_built', '')
+
+    # Try Railway first
+    railway_project_id = os.environ.get('RAILWAY_PROJECT_ID', '')
+    if os.environ.get('RAILWAY_TOKEN') and railway_project_id:
+        result = deploy_to_railway(railway_project_id, project_name, source_dir)
+        result['platform'] = 'railway'
+        _record_deployment(opportunity_id, 'railway', result)
+        return result
+
+    # Try Vercel
+    if os.environ.get('VERCEL_TOKEN'):
+        result = deploy_to_vercel(source_dir, project_name)
+        result['platform'] = 'vercel'
+        _record_deployment(opportunity_id, 'vercel', result)
+        return result
+
+    # Try GitHub only (no auto-deploy)
+    gh_url = push_to_github(source_dir, project_name)
+    if gh_url:
+        result = {
+            'success': True,
+            'platform': 'github_only',
+            'github_url': gh_url,
+            'message': 'Code pushed to GitHub. Manually deploy to Railway/Vercel via the repo page.',
+        }
+        _record_deployment(opportunity_id, 'github', result)
+        return result
+
+    return {
+        'success': False,
+        'error': 'no_deployment_credentials',
+        'message': 'Set GITHUB_TOKEN + GITHUB_USERNAME (and optionally RAILWAY_TOKEN, VERCEL_TOKEN)',
+    }
+
+
+def _record_deployment(opp_id: int, platform: str, result: Dict[str, Any]) -> None:
+    """Save deployment record to DB."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO deployments (
+                opportunity_id, platform, service_id, deploy_url, status, build_log, deployed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            opp_id, platform,
+            result.get('service_id', ''),
+            result.get('url') or result.get('railway_dashboard') or result.get('github_url', ''),
+            'live' if result.get('success') else 'failed',
+            json.dumps(result)[:4000],
+            datetime.now().isoformat() if result.get('success') else None,
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️  deploy log failed: {e}")
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python deployer.py <opportunity_id>")
+        sys.exit(1)
+    opp_id = int(sys.argv[1])
+    result = deploy_project(opp_id)
+    print(json.dumps(result, indent=2, default=str)[:2000])
