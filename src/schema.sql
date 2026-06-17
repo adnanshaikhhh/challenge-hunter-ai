@@ -8,10 +8,10 @@
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS research_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source TEXT,                       -- 'devpost_winners', 'mlh_past', etc.
+    source TEXT,
     source_url TEXT,
     title TEXT,
-    category TEXT,                     -- 'AI', 'Web3', 'Hackathon', 'Grant'
+    category TEXT,
     prize_usd INTEGER,
     winner_name TEXT,
     winner_url TEXT,
@@ -32,11 +32,11 @@ CREATE INDEX IF NOT EXISTS idx_research_category ON research_data(category);
 CREATE TABLE IF NOT EXISTS deployments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     opportunity_id INTEGER REFERENCES opportunities(id),
-    platform TEXT,                     -- 'railway', 'vercel', 'render', 'netlify'
-    service_id TEXT,                   -- platform's service ID
-    deploy_url TEXT,                   -- live URL
-    status TEXT DEFAULT 'pending',     -- pending | deploying | live | failed
-    build_log TEXT,                     -- JSON log
+    platform TEXT,
+    service_id TEXT,
+    deploy_url TEXT,
+    status TEXT DEFAULT 'pending',
+    build_log TEXT,
     deployed_at TEXT,
     last_check TEXT,
     response_time_ms INTEGER
@@ -54,9 +54,9 @@ CREATE TABLE IF NOT EXISTS videos (
     title TEXT,
     script TEXT,                        -- generated voiceover script
     duration_seconds INTEGER,
-    file_path TEXT,                     -- path to generated MP4
-    status TEXT DEFAULT 'pending',     -- pending | generating | ready | failed
-    voice TEXT,                         -- 'alloy', 'echo', etc.
+    file_path TEXT,
+    status TEXT DEFAULT 'pending',
+    voice TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -68,13 +68,13 @@ CREATE INDEX IF NOT EXISTS idx_videos_opp ON videos(opportunity_id);
 CREATE TABLE IF NOT EXISTS submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     opportunity_id INTEGER REFERENCES opportunities(id),
-    platform TEXT,                     -- 'devpost', 'mlh', 'solana', etc.
+    platform TEXT,
     submission_url TEXT,
     confirmation_code TEXT,
-    status TEXT DEFAULT 'pending',     -- pending | submitted | confirmed | rejected
-    form_data TEXT,                     -- JSON of what was submitted
+    status TEXT DEFAULT 'pending',
+    form_data TEXT,
     submitted_at TEXT,
-    result TEXT,                         -- 'won' | 'lost' | 'pending' | 'withdrawn'
+    result TEXT,
     result_date TEXT,
     notes TEXT
 );
