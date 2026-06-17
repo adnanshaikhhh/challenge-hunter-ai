@@ -247,8 +247,8 @@ def approve_opportunity(opp_id):
 @app.route('/api/opportunities/<int:opp_id>/build', methods=['POST'])
 def build_opportunity(opp_id):
     """
-    Trigger the actual AI code-generation step.
-    Requires OPENROUTER_API_KEY to be set.
+    Trigger the AI code-generation step (single-shot).
+    Requires LLM_PRIMARY_KEY or LLM_FALLBACK_KEY to be set.
     Runs in a background thread so the API stays responsive.
     """
     import threading
@@ -267,8 +267,27 @@ def build_opportunity(opp_id):
         'success': True,
         'message': f'Build started for opportunity #{opp_id}. Check back in 1-2 minutes.',
         'opportunity_id': opp_id,
-        'note': 'Requires OPENROUTER_API_KEY env var to be set.'
+        'note': 'Requires LLM_PRIMARY_KEY or LLM_FALLBACK_KEY env var to be set.'
     })
+
+
+@app.route('/api/opportunities/<int:opp_id>/hermes', methods=['POST'])
+def hermes_pipeline(opp_id):
+    """
+    Trigger the full autonomous Hermes pipeline:
+      generate → install → test → fix (loop) → security → commit → deploy → video → submission
+
+    Takes 5-30 minutes depending on how many test fixes are needed.
+    """
+    from hermes import run_hermes_async
+    return jsonify(run_hermes_async(opp_id))
+
+
+@app.route('/api/hermes/<int:opp_id>/status', methods=['GET'])
+def hermes_status(opp_id):
+    """Get the latest pipeline status + build log."""
+    from hermes import get_hermes_status
+    return jsonify(get_hermes_status(opp_id))
 
 
 @app.route('/api/opportunities/<int:opp_id>/reject', methods=['POST'])
@@ -570,7 +589,7 @@ def get_settings():
         'github_enabled': bool(os.environ.get('GITHUB_TOKEN')),
         'railway_enabled': bool(os.environ.get('RAILWAY_TOKEN')),
         'vercel_enabled': bool(os.environ.get('VERCEL_TOKEN')),
-        'openrouter_enabled': bool(os.environ.get('OPENROUTER_API_KEY')),
+        'llm_configured': bool(os.environ.get('LLM_PRIMARY_KEY') or os.environ.get('LLM_FALLBACK_KEY')),
     })
 
 
@@ -744,6 +763,40 @@ def submit_result(sub_id):
 def win_stats():
     from submitter import get_win_loss_stats
     return jsonify(get_win_loss_stats())
+
+
+# =============================================================================
+# v2.2: AI Advisor / Recommendations / Calendar / Standup
+# =============================================================================
+
+@app.route('/api/advisor/recommendations', methods=['GET'])
+def advisor_recommendations():
+    from advisor import get_recommendations
+    return jsonify({'items': get_recommendations(10)})
+
+
+@app.route('/api/advisor/calendar', methods=['GET'])
+def advisor_calendar():
+    from advisor import get_calendar
+    return jsonify(get_calendar(60))
+
+
+@app.route('/api/advisor/daily', methods=['GET'])
+def advisor_daily():
+    from advisor import get_daily_standup
+    return jsonify(get_daily_standup())
+
+
+@app.route('/api/advisor/advice', methods=['GET'])
+def advisor_advice():
+    from advisor import get_ai_advisor
+    return jsonify(get_ai_advisor())
+
+
+@app.route('/api/stats/summary', methods=['GET'])
+def stats_summary():
+    from advisor import get_stats_summary
+    return jsonify(get_stats_summary())
 
 
 # =============================================================================

@@ -440,10 +440,12 @@ console.log('hi');
     @test("generate_code_from_brief fails gracefully when no API key")
     def _():
         from code_generator import generate_code_from_brief
-        os.environ['OPENROUTER_API_KEY'] = ''
+        # Clear all LLM env vars so no provider can respond
+        for k in ['LLM_PRIMARY_KEY', 'LLM_FALLBACK_KEY', 'OPENAI_API_KEY']:
+            os.environ[k] = ''
         result = generate_code_from_brief('test brief')
         assert result['success'] is False
-        assert 'OPENROUTER_API_KEY' in result['error'] or 'not set' in result['error'].lower()
+        assert 'provider' in result.get('error', '').lower() or 'failed' in result.get('error', '').lower() or 'all' in result.get('error', '').lower()
         assert result['files'] == {}
 
     @test("write_generated_files creates files on disk")

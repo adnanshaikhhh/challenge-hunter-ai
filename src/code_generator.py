@@ -25,22 +25,16 @@ from config import DB_PATH, PROJECTS_DIR
 # Configuration
 # =============================================================================
 
-# OpenRouter supports MiniMax, Anthropic, OpenAI, etc. via one endpoint.
-# You can also point at a custom OpenAI-compatible endpoint (e.g. your own
-# MiniMax proxy, NVIDIA NIM, etc.) by setting OPENROUTER_BASE_URL.
-# https://openrouter.ai/docs
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
-# Default model: MiniMax M2.7 (cheap, fast, good enough for code gen)
-# Swap to "anthropic/claude-3-5-sonnet" for higher quality if you have credits
-OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'minimax/minimax-m2.7')
-# Base URL — defaults to OpenRouter, but you can override for any
-# OpenAI-compatible endpoint (custom MiniMax proxy, NVIDIA NIM, etc.)
-OPENROUTER_BASE_URL = os.environ.get(
-    'OPENROUTER_BASE_URL',
-    'https://openrouter.ai/api/v1/chat/completions'
-)
-OPENROUTER_URL = OPENROUTER_BASE_URL
-CODE_GEN_TIMEOUT = 300  # 5 min max per generation
+# OpenRouter replaced with unified LLM client (tokenrouter / NVIDIA NIM).
+# Kept as aliases for backward compatibility.
+from llm import LLMClient as _LLMClient
+default_llm = _LLMClient()
+
+# Legacy exports (so any code that still imports these names still works)
+OPENROUTER_API_KEY = ''
+OPENROUTER_URL = ''
+OPENROUTER_MODEL = ''
+OPENROUTER_BASE_URL = ''
 
 
 # =============================================================================
@@ -89,7 +83,7 @@ def extract_files_from_response(text: str) -> Dict[str, str]:
 def generate_code_from_brief(brief_text: str, model: Optional[str] = None,
                              project_name: str = 'project') -> Dict[str, Any]:
     """
-    Call OpenRouter with the brief and get back source files.
+    Call LLM with the brief and get back source files.
 
     Returns:
         {
@@ -100,15 +94,6 @@ def generate_code_from_brief(brief_text: str, model: Optional[str] = None,
             'error': str (if failed),
         }
     """
-    if not OPENROUTER_API_KEY:
-        return {
-            'success': False,
-            'error': 'OPENROUTER_API_KEY not set. Add it to your .env or Railway variables.',
-            'files': {},
-            'model': None,
-            'tokens': 0
-        }
-
     system_prompt = """You are an expert full-stack engineer. Given a project brief,
 generate the COMPLETE source code for the project.
 
@@ -169,53 +154,37 @@ Rules:
 Generate the COMPLETE codebase for this project now. Output all files using the fence format specified.
 """
 
-    body = {
-        'model': model or OPENROUTER_MODEL,
-        'messages': [
+    result = default_llm.complete(
+        messages=[
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_prompt}
         ],
-        'temperature': 0.3,
-        'max_tokens': 16000,
-    }
+        temperature=0.3,
+        max_tokens=16000,
+        timeout=300
+    )
 
-    headers = {
-        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://challenge-hunter-ai-production.up.railway.app',
-        'X-Title': 'Challenge Hunter AI'
-    }
-
-    try:
-        r = requests.post(OPENROUTER_URL, json=body, headers=headers, timeout=CODE_GEN_TIMEOUT)
-        if r.status_code != 200:
-            return {
-                'success': False,
-                'error': f'OpenRouter returned {r.status_code}: {r.text[:500]}',
-                'files': {},
-                'model': body['model'],
-                'tokens': 0
-            }
-        result = r.json()
-        content = result['choices'][0]['message']['content']
-        usage = result.get('usage', {})
-        tokens = usage.get('total_tokens', 0)
-
-        files = extract_files_from_response(content)
+    if not result.get('success'):
         return {
-            'success': True,
-            'files': files,
-            'model': body['model'],
-            'tokens': tokens,
-            'raw_response': content,
-            'error': None
+            'success': False,
+            'error': result.get('error') or 'LLM call failed',
+            'files': {},
+            'model': result.get('model'),
+            'tokens': 0
         }
-    except requests.exceptions.Timeout:
-        return {'success': False, 'error': f'Code gen timed out after {CODE_GEN_TIMEOUT}s',
-                'files': {}, 'model': body['model'], 'tokens': 0}
-    except Exception as e:
-        return {'success': False, 'error': f'{type(e).__name__}: {e}',
-                'files': {}, 'model': body['model'], 'tokens': 0}
+
+    content = result['content']
+    tokens = result.get('tokens', 0)
+    files = extract_files_from_response(content)
+    return {
+        'success': True,
+        'files': files,
+        'model': result.get('model', ''),
+        'provider': result.get('provider', ''),
+        'tokens': tokens,
+        'raw_response': content,
+        'error': None
+    }
 
 
 def write_generated_files(opportunity_id: int, files: Dict[str, str],
@@ -291,7 +260,7 @@ def build_project(opportunity_id: int) -> Dict[str, Any]:
 
     # Update status
     _set_status(opportunity_id, build_status='in_progress')
-    _log(opportunity_id, 'ai_build', 'started', f'Using model {OPENROUTER_MODEL}')
+    _log(opportunity_id, 'ai_build', 'started', 'Using unified LLM client')
 
     # Extract project name from brief
     project_name = 'project'
@@ -304,7 +273,7 @@ def build_project(opportunity_id: int) -> Dict[str, Any]:
         pass
 
     # Call the LLM
-    _log(opportunity_id, 'ai_build', 'calling_api', f'Model: {OPENROUTER_MODEL}')
+    _log(opportunity_id, 'ai_build', 'calling_api', 'Calling LLM provider (tokenrouter/NVIDIA NIM)')
     result = generate_code_from_brief(brief_text, project_name=project_name)
 
     if not result['success']:

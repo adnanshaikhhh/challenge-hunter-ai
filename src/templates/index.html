@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ app_name }} v{{ version }} — Autonomous Opportunity Hunter</title>
+  <title>{{ app_name }} v{{ version }}</title>
   <meta name="description" content="{{ tagline }}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
 </head>
 <body>
   <div class="app">
@@ -17,39 +17,48 @@
     <aside class="sidebar">
       <div class="sidebar-logo">
         <div class="mark">⚡</div>
-        <div>
+        <div class="text">
           <div class="name">Challenge Hunter</div>
-          <div class="version">v{{ version }}</div>
+          <div class="tagline">Autonomous AI v{{ version }}</div>
         </div>
       </div>
       <nav class="nav">
-        <button class="nav-item active" data-view="dashboard"><span class="icon">🎯</span> Dashboard</button>
-        <button class="nav-item" data-view="high"><span class="icon">🔥</span> High Priority</button>
-        <button class="nav-item" data-view="approved"><span class="icon">✅</span> Approved</button>
-        <button class="nav-item" data-view="building"><span class="icon">🔨</span> Building</button>
-        <button class="nav-item" data-view="submitted"><span class="icon">🏆</span> Submitted</button>
-        <button class="nav-item" data-view="analytics"><span class="icon">📊</span> Analytics</button>
-        <button class="nav-item" data-view="settings"><span class="icon">⚙️</span> Settings</button>
+        <div class="nav-section">Discover</div>
+        <button class="nav-item active" data-view="dashboard"><span class="icon">◎</span> Dashboard</button>
+        <button class="nav-item" data-view="calendar"><span class="icon">◷</span> Calendar</button>
+        <button class="nav-item" data-view="advisor"><span class="icon">✦</span> AI Advisor</button>
+        <button class="nav-item" data-view="research"><span class="icon">⌘</span> Research</button>
+
+        <div class="nav-section">Work</div>
+        <button class="nav-item" data-view="high"><span class="icon">▲</span> High Priority</button>
+        <button class="nav-item" data-view="approved"><span class="icon">✓</span> Approved</button>
+        <button class="nav-item" data-view="building"><span class="icon">⚒</span> Building</button>
+        <button class="nav-item" data-view="submitted"><span class="icon">★</span> Submitted</button>
+
+        <div class="nav-section">Track</div>
+        <button class="nav-item" data-view="analytics"><span class="icon">◐</span> Analytics</button>
+        <button class="nav-item" data-view="settings"><span class="icon">⚙</span> Settings</button>
       </nav>
       <div class="sidebar-footer">
-        <span class="status-dot" id="live-dot"></span>
+        <span class="status-dot"></span>
         <span id="last-scan-text">live</span>
       </div>
     </aside>
 
     <!-- =====================  Main  ===================== -->
     <main class="main">
+      <div class="hero">
+        <h1>Find. Build. Win.</h1>
+        <p class="subtitle">Autonomous opportunity detection and execution. {{ tagline }}.</p>
+        <div class="live-data" id="hero-stats"></div>
+      </div>
+
       <div class="topbar">
-        <h1 id="page-title">Dashboard</h1>
-        <div class="spacer"></div>
-        <input id="search-input" class="search-input" placeholder="Search opportunities…" />
+        <input id="search-input" class="search-input" placeholder="Search opportunities, projects, sources…" />
         <button class="btn btn-primary" id="scan-btn">⚡ Scan Now</button>
       </div>
 
-      <!-- Stats row -->
-      <div class="stat-row" id="stat-row"></div>
-
-      <!-- Dashboard view -->
+      <!-- ========== DASHBOARD VIEW ========== -->
       <div id="dashboard-view">
         <div class="filter-bar">
           <div class="pill-group">
@@ -66,7 +75,7 @@
             <span class="tag-chip" data-tag="hackathon">#hackathon</span>
             <span class="tag-chip" data-tag="bounty">#bounty</span>
           </div>
-          <div class="spacer" style="flex:1"></div>
+          <div style="flex:1"></div>
           <select id="sort-select" class="search-input" style="width:auto;">
             <option value="score">Sort: Score</option>
             <option value="ev">Sort: Expected Value</option>
@@ -79,6 +88,14 @@
             <button class="pill" data-layout="list" onclick="setLayout('list')">☰ List</button>
           </div>
           <span id="result-count" style="font-size:12px; color:var(--text-muted);"></span>
+        </div>
+
+        <!-- In-progress build card -->
+        <div id="active-build-card" style="display:none;" class="progress-card">
+          <strong>🔨 Build in progress for #<span id="active-build-id">?</span></strong>
+          <ul class="steps" id="active-build-steps">
+            <li class="step"><span class="icon">○</span> Pending</li>
+          </ul>
         </div>
 
         <div class="card-grid" id="card-grid"></div>
@@ -96,14 +113,53 @@
         </div>
       </div>
 
-      <!-- Analytics view -->
-      <div id="analytics-view" style="display:none;">
-        <div id="analytics-root"></div>
+      <!-- ========== CALENDAR VIEW ========== -->
+      <div id="calendar-view" style="display:none;">
+        <div id="calendar-root">
+          <div class="skeleton" style="height:200px;"></div>
+        </div>
       </div>
 
-      <!-- Settings view -->
+      <!-- ========== AI ADVISOR VIEW ========== -->
+      <div id="advisor-view" style="display:none;">
+        <div id="advisor-root">
+          <div class="advisor-section">
+            <h2>✦ Daily Standup</h2>
+            <div id="standup-content" class="advice-text">Loading...</div>
+          </div>
+          <div class="advisor-section">
+            <h2>✦ AI Advisor — What to Build First</h2>
+            <div id="advice-content" class="advice-text">Loading...</div>
+          </div>
+          <div class="advisor-section">
+            <h2>✦ Top Recommendations</h2>
+            <div id="recommendations-content">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== RESEARCH VIEW ========== -->
+      <div id="research-view" style="display:none;">
+        <div id="research-root">
+          <div class="advisor-section">
+            <h2>⌘ Research Data</h2>
+            <div id="research-content">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== ANALYTICS VIEW ========== -->
+      <div id="analytics-view" style="display:none;">
+        <div id="analytics-root">
+          <div class="skeleton" style="height:200px;"></div>
+        </div>
+      </div>
+
+      <!-- ========== SETTINGS VIEW ========== -->
       <div id="settings-view" style="display:none;">
-        <div id="settings-root"></div>
+        <div id="settings-root">
+          <div class="skeleton" style="height:200px;"></div>
+        </div>
       </div>
     </main>
   </div>
@@ -119,6 +175,6 @@
 
   <div class="toast-stack" id="toast-stack"></div>
 
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

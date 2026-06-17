@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Challenge Hunter AI v2.1 — Research Engine
+Challenge Hunter AI v2.2 — Research Engine
 Scrapes past winners, judge preferences, and winning patterns.
-Uses OpenRouter to extract structured insights from unstructured web content.
+Uses unified LLM client (tokenrouter / NVIDIA NIM) for structured insight extraction.
 """
 
 from __future__ import annotations
@@ -17,15 +17,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from bs4 import BeautifulSoup
 
-from config import (
-    AI_ALLOWED_KEYWORDS, DB_PATH, HTTP_HEADERS, REQUEST_DELAY_SECONDS
-)
-
-
-# Reuse code_generator's OpenRouter config
-from code_generator import (
-    OPENROUTER_API_KEY, OPENROUTER_URL, OPENROUTER_MODEL
-)
+from config import DB_PATH, HTTP_HEADERS, REQUEST_DELAY_SECONDS
+from llm import LLMClient, default_client
 
 
 # =============================================================================
@@ -108,7 +101,7 @@ def _ai_extract_insights(text: str, source_name: str) -> List[Dict[str, Any]]:
     Use the LLM to extract structured insights from raw web content.
     Returns a list of research_data records.
     """
-    if not OPENROUTER_API_KEY or not text:
+    if not text:
         return []
 
     # Truncate to avoid huge prompts
@@ -140,38 +133,30 @@ Page content (truncated to first 12000 chars):
 
 Extract the structured data now as a JSON array."""
 
+    result = default_client.complete(
+        messages=[
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt}
+        ],
+        temperature=0.1,
+        max_tokens=4000,
+        timeout=120
+    )
+    if not result.get('success'):
+        return []
+
+    content = result['content']
+    # Try to find JSON array
+    json_match = re.search(r'\[.*\]', content, re.DOTALL)
+    if not json_match:
+        return []
     try:
-        r = requests.post(
-            OPENROUTER_URL,
-            headers={
-                'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://challenge-hunter-ai-production.up.railway.app',
-                'X-Title': 'Challenge Hunter Research'
-            },
-            json={
-                'model': OPENROUTER_MODEL,
-                'messages': [
-                    {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': user_prompt}
-                ],
-                'temperature': 0.1,
-                'max_tokens': 4000,
-            },
-            timeout=120
-        )
-        r.raise_for_status()
-        content = r.json()['choices'][0]['message']['content']
-        # Try to find JSON array
-        json_match = re.search(r'\[.*\]', content, re.DOTALL)
-        if not json_match:
-            return []
         data = json.loads(json_match.group(0))
         if not isinstance(data, list):
             return []
         return data
     except Exception as e:
-        print(f"  ⚠️  AI extract failed: {e}")
+        print(f"  ⚠️  JSON parse failed: {e}")
         return []
 
 

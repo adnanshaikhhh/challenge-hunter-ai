@@ -24,10 +24,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from config import DB_PATH, PROJECTS_DIR
-
-
-# Reuse OpenRouter config from code_generator
-from code_generator import OPENROUTER_API_KEY, OPENROUTER_URL, OPENROUTER_MODEL
+from llm import LLMClient, default_client
 
 
 # =============================================================================
@@ -39,9 +36,6 @@ def _generate_script(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
     Use the LLM to write a 2-3 minute voiceover script for the demo video.
     Returns plain text script (no stage directions).
     """
-    if not OPENROUTER_API_KEY:
-        return _fallback_script(opp, analysis)
-
     project = (analysis.get('recommended_project') or {})
     system_prompt = """You are writing a voiceover script for a 2-3 minute hackathon demo video.
 Write in second-person, present tense, conversational, enthusiastic but not over the top.
@@ -67,30 +61,18 @@ Tech stack: {json.dumps(project.get('tech_stack', {}))}
 
 Write the demo video script now."""
 
-    try:
-        r = requests.post(
-            OPENROUTER_URL,
-            headers={
-                'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://challenge-hunter-ai-production.up.railway.app',
-            },
-            json={
-                'model': OPENROUTER_MODEL,
-                'messages': [
-                    {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': user_prompt}
-                ],
-                'temperature': 0.7,
-                'max_tokens': 800,
-            },
-            timeout=60
-        )
-        r.raise_for_status()
-        return r.json()['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        print(f"⚠️  script gen failed: {e}")
+    result = default_client.complete(
+        messages=[
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt}
+        ],
+        temperature=0.7,
+        max_tokens=800,
+        timeout=60
+    )
+    if not result.get('success'):
         return _fallback_script(opp, analysis)
+    return result['content'].strip()
 
 
 def _fallback_script(opp: Dict[str, Any], analysis: Dict[str, Any]) -> str:
