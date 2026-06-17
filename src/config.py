@@ -170,6 +170,6 @@ HTTP_HEADERS = {
 # Version
 # ----------------------------------------------------------------------------
 
-VERSION = '2.0.0'
+VERSION = '2.2.0'
 APP_NAME = 'Challenge Hunter AI'
 APP_TAGLINE = 'Autonomous opportunity detection and execution platform'
