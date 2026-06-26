@@ -95,6 +95,7 @@ class SchedulerManager:
                 id='full_scan',
                 name='Full opportunity scan',
                 replace_existing=True,
+                misfire_grace_time=300,
                 # Defer first run 60s to give DB init / seed time to complete.
                 next_run_time=datetime_now_plus_seconds(60)
             )
@@ -103,21 +104,24 @@ class SchedulerManager:
                 CronTrigger(hour=DAILY_DIGEST_HOUR_UTC, minute=0),
                 id='daily_digest',
                 name='Daily digest',
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=300
             )
             scheduler.add_job(
                 job_weekly_summary,
                 CronTrigger(day_of_week=WEEKLY_SUMMARY_DAY, hour=DAILY_DIGEST_HOUR_UTC + 1, minute=0),
                 id='weekly_summary',
                 name='Weekly summary',
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=300
             )
             scheduler.add_job(
                 job_health_ping,
                 IntervalTrigger(minutes=14),
                 id='health_ping',
                 name='Health ping',
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=300
             )
             scheduler.start()
             cls._instance = scheduler

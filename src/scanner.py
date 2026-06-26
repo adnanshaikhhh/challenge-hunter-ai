@@ -60,6 +60,16 @@ def _days_until(deadline_str: str) -> int:
 def _parse_prize(text: str) -> int:
     if not text:
         return 0
+    # Handle "10k", "25K", "100 thousand" notation
+    text_lower = text.lower()
+    # Match patterns like "$10k", "25K", "100 thousand"
+    k_match = re.search(r'[\$€£]?\s*(\d+(?:\.\d+)?)\s*k\b', text_lower)
+    if k_match:
+        return int(float(k_match.group(1)) * 1000)
+    thousand_match = re.search(r'(\d+)\s*thousand', text_lower)
+    if thousand_match:
+        return int(thousand_match.group(1)) * 1000
+    # Standard number extraction
     nums = re.findall(r'[\$€£]?\s*([\d,]{3,})', text)
     if not nums:
         return 0
@@ -73,9 +83,20 @@ def detect_ai_policy(text: str) -> str:
     if not text:
         return 'unclear'
     t = text.lower()
-    # Check banned first (more specific)
-    if any(kw in t for kw in AI_BANNED_KEYWORDS):
-        return 'banned'
+    # Check banned first (more specific), including negative constructions
+    banned_patterns = AI_BANNED_KEYWORDS + [
+        r'\bai\b.{0,10}\b(not|isn\'?t|aren\'?t)\b.{0,10}\b(allowed|permitted)',
+        r'\b(not|isn\'?t|aren\'?t)\b.{0,10}\ballowed\b.{0,10}\bai\b',
+        r'\bno\s+ai\b',
+        r'\bai\b.{0,10}\bprohibited\b'
+    ]
+    for kw in banned_patterns:
+        if isinstance(kw, str):
+            if kw in t:
+                return 'banned'
+        else:
+            if re.search(kw, t):
+                return 'banned'
     # Allowed keywords (exact match)
     if any(kw in t for kw in AI_ALLOWED_KEYWORDS):
         return 'allowed'
@@ -356,9 +377,14 @@ class ScannerEngine:
                 sources_scanned += 1
                 opps = self._scan_source(url)
                 all_opps.extend(opps)
-                print(f"  ✓ {url} — {len(opps)} candidates")
+                if len(opps) > 0:
+                    print(f"  ✓ {url} — {len(opps)} candidates")
+                else:
+                    print(f"  ⚠️  {url} — 0 results (may be empty or blocked)")
             except Exception as e:
-                self.errors.append(f"{url}: {e}")
+                error_msg = f"{url}: {e}"
+                self.errors.append(error_msg)
+                print(f"  ✗ {url} — {e}")
 
         # DuckDuckGo discovery
         try:
@@ -366,12 +392,20 @@ class ScannerEngine:
             all_opps.extend(ddg_opps)
             print(f"  ✓ DuckDuckGo — {len(ddg_opps)} candidates")
         except Exception as e:
-            self.errors.append(f"ddg: {e}")
+            error_msg = f"ddg: {e}"
+            self.errors.append(error_msg)
+            print(f"  ✗ DuckDuckGo — {e}")
 
-        # Deduplicate by url
+        # Deduplicate by url (normalize: remove fragments, trailing slashes)
         dedup: Dict[str, Dict[str, Any]] = {}
         for o in all_opps:
-            dedup[o['url']] = o
+            url = o['url']
+            # Normalize URL: remove fragment and trailing slash
+            from urllib.parse import urlparse, urlunparse
+            parsed = urlparse(url)
+            normalized = urlunparse(parsed._replace(fragment=''))
+            normalized = normalized.rstrip('/')
+            dedup[normalized] = o
 
         for opp in dedup.values():
             try:
@@ -385,8 +419,15 @@ class ScannerEngine:
         expire_stale(cursor)
         duration = time.time() - start
         _log_scan(cursor, sources_scanned, new_found, high_value, self.errors, duration)
-        conn.commit()
-        conn.close()
+        
+        try:
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            self.errors.append(f"commit failed: {e}")
+            print(f"❌ Database commit failed: {e}")
+        finally:
+            conn.close()
 
         result = {
             'sources_scanned': sources_scanned,
@@ -396,6 +437,12 @@ class ScannerEngine:
             'duration_seconds': round(duration, 2),
             'scan_time': _now()
         }
+        
+        # Loud warning if scan found nothing due to errors
+        if new_found == 0 and len(self.errors) > 0:
+            print(f"⚠️  WARNING: Found 0 new opportunities but encountered {len(self.errors)} errors!")
+            print(f"⚠️  Check if sources are down or blocked. Errors: {self.errors[:3]}")
+        
         print(f"✅ Scan complete: {new_found} new, {high_value} high-value, {len(self.errors)} errors in {duration:.1f}s")
         return result
 

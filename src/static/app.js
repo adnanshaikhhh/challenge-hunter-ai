@@ -233,21 +233,45 @@ async function loadOpportunities() {
   if (state.tag) params.set('tag', state.tag);
   if (state.search) params.set('search', state.search);
   if (state.sort) params.set('sort_by', state.sort);
-  const r = await API('/api/opportunities?' + params.toString());
-  state.loading = false;
-  if (!r.ok) {
-    toast('Failed to load opportunities', 'error');
-    return;
+  
+  try {
+    const r = await API('/api/opportunities?' + params.toString());
+    state.loading = false;
+    if (!r.ok) {
+      toast('Failed to load opportunities: ' + (r.data?.error || r.status), 'error');
+      // Clear skeleton and show error message
+      const grid = document.getElementById('card-grid');
+      if (grid) {
+        grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--accent-red);"><h3>Failed to load opportunities</h3><p>Error: ' + (r.data?.error || r.status) + '</p><button class="btn" onclick="loadOpportunities()">Retry</button></div>';
+      }
+      return;
+    }
+    state.opportunities = r.data.items;
+    renderOpportunities();
+  } catch (err) {
+    state.loading = false;
+    toast('Network error: ' + err.message, 'error');
+    const grid = document.getElementById('card-grid');
+    if (grid) {
+      grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--accent-red);"><h3>Network error</h3><p>' + err.message + '</p><button class="btn" onclick="loadOpportunities()">Retry</button></div>';
+    }
   }
-  state.opportunities = r.data.items;
-  renderOpportunities();
 }
 
 function renderOpportunities() {
   const grid = document.getElementById('card-grid');
   const tbody = document.querySelector('#list-table tbody');
-  if (grid) grid.innerHTML = state.opportunities.map(renderCard).join('');
-  if (tbody) tbody.innerHTML = state.opportunities.map(renderListRow).join('');
+  
+  // Show empty state if no opportunities
+  if (state.opportunities.length === 0 && !state.loading) {
+    const emptyMsg = '<div style="grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--text-muted);"><h3 style="margin-bottom:10px;">No opportunities found</h3><p>Try adjusting filters or click "⚡ Scan Now" to discover new opportunities.</p></div>';
+    if (grid) grid.innerHTML = emptyMsg;
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:40px; color:var(--text-muted);">No opportunities found</td></tr>';
+  } else {
+    if (grid) grid.innerHTML = state.opportunities.map(renderCard).join('');
+    if (tbody) tbody.innerHTML = state.opportunities.map(renderListRow).join('');
+  }
+  
   const countEl = document.getElementById('result-count');
   if (countEl) {
     countEl.textContent = `${state.opportunities.length} ${state.opportunities.length === 1 ? 'opportunity' : 'opportunities'}`;

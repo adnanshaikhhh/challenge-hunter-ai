@@ -372,25 +372,66 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         from scanner import ScannerEngine
-        scanner = ScannerEngine(DB_PATH)
-        result = scanner.run_full_scan()
+        import threading
+        
+        def _bg_scan():
+            try:
+                scanner = ScannerEngine(DB_PATH)
+                result = scanner.run_full_scan()
+                
+                new_found = result.get('new_found', 0)
+                errors = result.get('errors', [])
 
-        new_found = result.get('new_found', 0)
-        errors = result.get('errors', [])
-
-        response = f"""✅ Scan Complete!
+                response = f"""✅ Scan Complete!
 
 📡 Sources scanned: {result.get('sources_scanned', 0)}
 🆕 New opportunities found: {new_found}"""
 
-        if errors:
-            response += f"\n⚠️ Errors: {len(errors)}"
+                if errors:
+                    response += f"\n⚠️ Errors: {len(errors)}"
 
-        await update.message.reply_text(response, parse_mode='HTML')
+                # Send result back to the chat
+                import asyncio
+                from telegram import Bot
+                bot = Bot(token=TELEGRAM_BOT_TOKEN)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        bot.send_message(
+                            chat_id=update.message.chat_id,
+                            text=response,
+                            parse_mode='HTML'
+                        )
+                    )
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.error(f"Background scan error: {e}")
+                # Send error message
+                import asyncio
+                from telegram import Bot
+                bot = Bot(token=TELEGRAM_BOT_TOKEN)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        bot.send_message(
+                            chat_id=update.message.chat_id,
+                            text=f"❌ Scan failed: {str(e)}",
+                            parse_mode='HTML'
+                        )
+                    )
+                finally:
+                    loop.close()
+        
+        # Start scan in background thread
+        t = threading.Thread(target=_bg_scan, daemon=True, name='telegram-scan')
+        t.start()
 
     except Exception as e:
-        logger.error(f"Scan error: {e}")
-        await update.message.reply_text(f"❌ Scan failed: {str(e)}")
+        logger.error(f"Scan command error: {e}")
+        await update.message.reply_text(f"❌ Failed to start scan: {str(e)}")
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):

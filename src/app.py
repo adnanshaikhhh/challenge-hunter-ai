@@ -18,6 +18,7 @@ from flask import (
     Flask, jsonify, render_template, request, send_from_directory
 )
 from flask_cors import CORS
+from flask_compress import Compress
 
 from auto_builder import run_build_async
 from config import (
@@ -88,7 +89,12 @@ app = Flask(
     static_folder='static'
 )
 app.config['SECRET_KEY'] = SECRET_KEY
+app.config['COMPRESS_MIMETYPES'] = ['text/html', 'text/css', 'application/javascript', 'application/json']
+app.config['COMPRESS_LEVEL'] = 6
+app.config['COMPRESS_MIN_SIZE'] = 500
+
 CORS(app)
+Compress(app)
 
 
 # =============================================================================
@@ -96,9 +102,13 @@ CORS(app)
 # =============================================================================
 
 def get_db():
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+    try:
+        c = sqlite3.connect(DB_PATH)
+        c.row_factory = sqlite3.Row
+        return c
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}", flush=True)
+        raise
 
 
 def row_to_dict(row) -> Optional[Dict[str, Any]]:
@@ -591,6 +601,73 @@ def get_settings():
         'vercel_enabled': bool(os.environ.get('VERCEL_TOKEN')),
         'llm_configured': bool(os.environ.get('LLM_PRIMARY_KEY') or os.environ.get('LLM_FALLBACK_KEY')),
     })
+
+
+# =============================================================================
+# Metrics endpoint
+# =============================================================================
+
+@app.route('/api/metrics', methods=['GET'])
+def metrics():
+    """System health metrics for monitoring"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Opportunity counts
+        cursor.execute("SELECT COUNT(*) as c FROM opportunities")
+        total_opps = cursor.fetchone()['c']
+        
+        cursor.execute("SELECT COUNT(*) as c FROM opportunities WHERE status = 'pending'")
+        pending = cursor.fetchone()['c']
+        
+        cursor.execute("SELECT COUNT(*) as c FROM opportunities WHERE status = 'approved'")
+        approved = cursor.fetchone()['c']
+        
+        # Scan metrics
+        cursor.execute("SELECT COUNT(*) as c FROM scan_log")
+        total_scans = cursor.fetchone()['c']
+        
+        cursor.execute("SELECT scan_time, new_found, errors FROM scan_log ORDER BY id DESC LIMIT 1")
+        last_scan = cursor.fetchone()
+        
+        # Notification metrics
+        cursor.execute("SELECT COUNT(*) as c FROM notifications WHERE delivered = 1")
+        notif_delivered = cursor.fetchone()['c']
+        
+        cursor.execute("SELECT COUNT(*) as c FROM notifications WHERE delivered = 0")
+        notif_failed = cursor.fetchone()['c']
+        
+        conn.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'service': APP_NAME,
+            'version': VERSION,
+            'timestamp': datetime.now().isoformat(),
+            'opportunities': {
+                'total': total_opps,
+                'pending': pending,
+                'approved': approved
+            },
+            'scans': {
+                'total': total_scans,
+                'last_scan_time': last_scan['scan_time'] if last_scan else None,
+                'last_scan_found': last_scan['new_found'] if last_scan else 0,
+                'last_scan_errors': len(json.loads(last_scan['errors'])) if last_scan and last_scan['errors'] else 0
+            },
+            'notifications': {
+                'delivered': notif_delivered,
+                'failed': notif_failed,
+                'success_rate': round(notif_delivered / (notif_delivered + notif_failed) * 100, 1) if (notif_delivered + notif_failed) > 0 else 0
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 
 # =============================================================================
