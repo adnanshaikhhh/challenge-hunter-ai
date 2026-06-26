@@ -1,6 +1,7 @@
 # Challenge Hunter AI - Python Dependencies
 flask>=2.3.0
 flask-cors>=4.0.0
+flask-compress>=1.14.0
 apscheduler>=3.10.0
 python-telegram-bot>=20.0
 requests>=2.31.0
