@@ -83,26 +83,29 @@ def detect_ai_policy(text: str) -> str:
     if not text:
         return 'unclear'
     t = text.lower()
-    # Check banned first (more specific), including negative constructions
-    banned_patterns = AI_BANNED_KEYWORDS + [
-        r'\bai\b.{0,10}\b(not|isn\'?t|aren\'?t)\b.{0,10}\b(allowed|permitted)',
-        r'\b(not|isn\'?t|aren\'?t)\b.{0,10}\ballowed\b.{0,10}\bai\b',
-        r'\bno\s+ai\b',
+    
+    # Check banned first (more specific)
+    # First check simple string keywords
+    if any(kw in t for kw in AI_BANNED_KEYWORDS):
+        return 'banned'
+    
+    # Then check regex patterns for negative constructions like "AI NOT allowed", "AI isn't allowed"
+    import re
+    banned_patterns = [
+        r'\bai\b.{0,10}\b(not|isn\'?t|aren\'?t|no)\b.{0,10}\b(allowed|permitted)',
+        r'\b(not|isn\'?t|aren\'?t|no)\b.{0,10}\b(allowed|permitted)\b.{0,10}\bai\b',
         r'\bai\b.{0,10}\bprohibited\b'
     ]
-    for kw in banned_patterns:
-        if isinstance(kw, str):
-            if kw in t:
-                return 'banned'
-        else:
-            if re.search(kw, t):
-                return 'banned'
+    for pat in banned_patterns:
+        if re.search(pat, t):
+            return 'banned'
+    
     # Allowed keywords (exact match)
     if any(kw in t for kw in AI_ALLOWED_KEYWORDS):
         return 'allowed'
+    
     # Heuristic patterns for allowed:
     # "ai ... allowed", "ai ... permitted", "use ... ai", "llm ... allowed"
-    import re
     allowed_patterns = [
         r'\bai\b.{0,20}\b(allowed|permitted|encouraged|welcome|ok)\b',
         r'\b(allowed|permitted|encouraged|welcome|ok)\b.{0,20}\bai\b',
